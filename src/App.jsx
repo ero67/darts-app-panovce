@@ -155,10 +155,9 @@ function AppContent() {
     );
   }
 
-  // Show authentication screen if user is not logged in
-  if (!user) {
-    return <Auth />;
-  }
+  // Allow public access - users can view everything without login
+  // Only show Auth page if user explicitly navigates to /login
+  // Removed: if (!user) { return <Auth />; }
 
   const handleCreateTournament = () => {
     navigate('/create-tournament');
@@ -266,11 +265,16 @@ function AppContent() {
             />
           } />
           <Route path="/live-matches" element={<LiveMatchesDashboard />} />
+          <Route path="/login" element={<Auth />} />
           <Route path="/create-tournament" element={
-            <TournamentCreation 
-              onTournamentCreated={handleTournamentCreated}
-              onBack={() => navigate('/')}
-            />
+            user ? (
+              <TournamentCreation 
+                onTournamentCreated={handleTournamentCreated}
+                onBack={() => navigate('/')}
+              />
+            ) : (
+              <Auth />
+            )
           } />
           <Route path="/tournament/:id" element={<TournamentRoute />} />
           <Route path="/match/:id" element={<MatchRoute />} />

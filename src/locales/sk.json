@@ -4,6 +4,7 @@
     "tournaments": "Turnaje",
     "liveMatches": "Live Zápasy",
     "createTournament": "Vytvoriť Turnaj",
+    "login": "Prihlásiť sa",
     "logout": "Odhlásiť sa",
     "adminScorer": "Admin/Zapisovateľ"
   },
@@ -198,9 +199,9 @@
   },
   "auth": {
     "appTitle": "Správca Šípkových Turnajov",
-    "signInAsAdmin": "Prihláste sa {{action}} ako administrátor/zapisovateľ turnaja",
-    "in": "sa",
-    "up": "sa",
+    "signInAsAdmin": "Prihlásenie ako administrátor/zapisovateľ turnaja",
+    "in": "",
+    "up": "",
     "continueInterruptedMatches": "Pokračovať v prerušených zápasoch",
     "adminControlsForCorrections": "Admin ovládanie pre opravy",
     "tournamentManagement": "Správa turnajov",

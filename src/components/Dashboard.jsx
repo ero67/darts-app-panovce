@@ -1,9 +1,11 @@
 import React from 'react';
 import { Plus, Trophy, Users, Target, Calendar, TrendingUp } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export function Dashboard({ tournaments, onCreateTournament, onSelectTournament }) {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const activeTournaments = tournaments.filter(t => t.status === 'active');
   const completedTournaments = tournaments.filter(t => t.status === 'completed');
   
@@ -20,10 +22,12 @@ export function Dashboard({ tournaments, onCreateTournament, onSelectTournament 
     <div className="dashboard">
       <div className="dashboard-header">
         <h1>{t('dashboard.title')}</h1>
-        <button className="create-tournament-btn" onClick={onCreateTournament}>
-          <Plus size={20} />
-          {t('tournaments.create')}
-        </button>
+        {user && (
+          <button className="create-tournament-btn" onClick={onCreateTournament}>
+            <Plus size={20} />
+            {t('tournaments.create')}
+          </button>
+        )}
       </div>
 
       <div className="stats-grid">
@@ -103,10 +107,12 @@ export function Dashboard({ tournaments, onCreateTournament, onSelectTournament 
               <Trophy size={48} />
               <h3>{t('dashboard.noTournaments')}</h3>
               <p>{t('dashboard.createFirst')}</p>
-              <button className="create-first-btn" onClick={onCreateTournament}>
-                <Plus size={20} />
-                {t('tournaments.create')}
-              </button>
+              {user && (
+                <button className="create-first-btn" onClick={onCreateTournament}>
+                  <Plus size={20} />
+                  {t('tournaments.create')}
+                </button>
+              )}
             </div>
           )}
         </div>

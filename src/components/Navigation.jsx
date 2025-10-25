@@ -101,27 +101,46 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
       </div>
       
       <div className="nav-footer">
-        <div className="user-info">
-          <User size={16} />
-          {(!isCollapsed || isMobile) && (
-            <div className="user-details">
-              <span className="user-name">{user?.user_metadata?.full_name || user?.email || 'User'}</span>
-              <span className="user-role">{t('navigation.adminScorer')}</span>
+        {user ? (
+          <>
+            <div className="user-info">
+              <User size={16} />
+              {(!isCollapsed || isMobile) && (
+                <div className="user-details">
+                  <span className="user-name">{user?.user_metadata?.full_name || user?.email || 'User'}</span>
+                  <span className="user-role">{t('navigation.adminScorer')}</span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="language-section">
-          <LanguageSwitcher />
-        </div>
-        
-        <button 
-          className="logout-btn" 
-          onClick={handleSignOut}
-          title={isCollapsed ? 'Logout' : ''}
-        >
-          <LogOut size={16} />
-          {(!isCollapsed || isMobile) && <span>{t('navigation.logout')}</span>}
-        </button>
+            <div className="language-section">
+              <LanguageSwitcher />
+            </div>
+            
+            <button 
+              className="logout-btn" 
+              onClick={handleSignOut}
+              title={isCollapsed ? t('navigation.logout') : ''}
+            >
+              <LogOut size={16} />
+              {(!isCollapsed || isMobile) && <span>{t('navigation.logout')}</span>}
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="language-section">
+              <LanguageSwitcher />
+            </div>
+            
+            <button 
+              className="login-btn" 
+              onClick={() => onViewChange('/login')}
+              title={isCollapsed ? t('navigation.login') : ''}
+            >
+              <User size={16} />
+              {(!isCollapsed || isMobile) && <span>{t('navigation.login')}</span>}
+            </button>
+          </>
+        )}
       </div>
     </nav>
   );

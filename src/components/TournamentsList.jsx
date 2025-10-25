@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Plus, Trophy, Users, Target, Calendar, Trash2, Play, MoreVertical } from 'lucide-react';
 import { useAdmin } from '../contexts/AdminContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function TournamentsList({ tournaments, onCreateTournament, onSelectTournament, onDeleteTournament }) {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const [filter, setFilter] = useState('all'); // 'all', 'active', 'completed'
   const [sortBy, setSortBy] = useState('updated'); // 'updated', 'created', 'name'
   const { isAdmin } = useAdmin();
@@ -38,10 +40,12 @@ export function TournamentsList({ tournaments, onCreateTournament, onSelectTourn
     <div className="tournaments-list">
       <div className="list-header">
         <h1>{t('tournaments.title')}</h1>
-        <button className="create-tournament-btn" onClick={onCreateTournament}>
-          <Plus size={20} />
-          {t('tournaments.create')}
-        </button>
+        {user && (
+          <button className="create-tournament-btn" onClick={onCreateTournament}>
+            <Plus size={20} />
+            {t('tournaments.create')}
+          </button>
+        )}
       </div>
 
       <div className="list-controls">
@@ -165,7 +169,7 @@ export function TournamentsList({ tournaments, onCreateTournament, onSelectTourn
               : t('tournaments.noFilteredTournaments', { filter })
             }
           </p>
-          {filter === 'all' && (
+          {filter === 'all' && user && (
             <button className="create-first-btn" onClick={onCreateTournament}>
               <Plus size={20} />
               {t('tournaments.create')}

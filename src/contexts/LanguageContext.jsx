@@ -22,7 +22,7 @@ export function LanguageProvider({ children }) {
   }, [language]);
 
   // Helper function to get nested translation
-  const t = (key) => {
+  const t = (key, params = {}) => {
     const keys = key.split('.');
     let value = translations[language];
     
@@ -39,8 +39,15 @@ export function LanguageProvider({ children }) {
             return key; // Return key if translation not found
           }
         }
-        return value;
+        break;
       }
+    }
+    
+    // Handle interpolation - replace {{key}} with params[key]
+    if (typeof value === 'string' && Object.keys(params).length > 0) {
+      Object.keys(params).forEach(paramKey => {
+        value = value.replace(new RegExp(`{{${paramKey}}}`, 'g'), params[paramKey]);
+      });
     }
     
     return value || key;

@@ -4,6 +4,7 @@
     "tournaments": "Tournaments",
     "liveMatches": "Live Matches",
     "createTournament": "Create Tournament",
+    "login": "Login",
     "logout": "Logout",
     "adminScorer": "Admin/Scorer"
   },
@@ -198,9 +199,9 @@
   },
   "auth": {
     "appTitle": "Darts Tournament Manager",
-    "signInAsAdmin": "Sign {{action}} as tournament administrator/scorer",
-    "in": "in",
-    "up": "up",
+    "signInAsAdmin": "Administrator/Scorer Login",
+    "in": "",
+    "up": "",
     "continueInterruptedMatches": "Continue interrupted matches",
     "adminControlsForCorrections": "Admin controls for corrections",
     "tournamentManagement": "Tournament management",
