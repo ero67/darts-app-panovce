@@ -145,6 +145,14 @@
     "enablePlayoffs": "Enable Playoffs",
     "playersAdvancingPerGroup": "Players advancing per group",
     "playoffLegsToWin": "Playoff legs to win",
+    "standingsCriteriaOrder": "Standings Criteria Order",
+    "standingsCriteriaOrderDescription": "Set the order of criteria for sorting in group standings. Criteria will be used in this order when values are equal.",
+    "matchesWon": "Matches Won",
+    "legDifference": "Leg Difference",
+    "average": "Average",
+    "headToHead": "Head to Head",
+    "moveUp": "Move Up",
+    "moveDown": "Move Down",
     "updateSettings": "Update Settings"
   },
   "management": {
@@ -195,7 +203,10 @@
     "startPlayoffs": "Start Playoffs",
     "playoffsNote": "Players will be randomly seeded in the bracket",
     "playoffsNotAvailable": "Playoffs Not Available",
-    "playoffsAvailableAfterGroups": "Playoffs will be available once group stage is completed."
+    "playoffsAvailableAfterGroups": "Playoffs will be available once group stage is completed.",
+    "editMatchPlayers": "Edit Match Players",
+    "playoffMatchUpdated": "Playoff match updated successfully",
+    "failedToUpdatePlayoffMatch": "Failed to update playoff match"
   },
   "auth": {
     "appTitle": "Darts Tournament Manager",

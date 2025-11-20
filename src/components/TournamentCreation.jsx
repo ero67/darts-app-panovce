@@ -28,8 +28,14 @@ export function TournamentCreation({ onTournamentCreated, onBack }) {
       playoffSettings: {
         enabled: false,
         playersPerGroup: 1,
-        playoffLegsToWin: 3
+        legsToWinByRound: {
+          16: 3,  // Round of 16
+          8: 3,   // Quarter-finals
+          4: 3,   // Semi-finals
+          2: 3    // Final
+        }
       },
+      standingsCriteriaOrder: ['matchesWon', 'legDifference', 'average', 'headToHead'],
       playoffs: null, // Playoffs will be created only when user clicks "Start Playoffs"
       createdAt: new Date().toISOString(),
       status: 'open_for_registration' // Tournament is open for player registration

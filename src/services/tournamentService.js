@@ -1,7 +1,7 @@
 import { supabase, generateId } from '../lib/supabase.js'
 
 // Helper function to calculate group standings
-function calculateGroupStandings(group) {
+function calculateGroupStandings(group, criteriaOrder = null) {
   if (!group.players || !group.matches) {
     return [];
   }
@@ -19,7 +19,8 @@ function calculateGroupStandings(group) {
       totalScore: 0,
       dartsThrown: 0,
       average: 0,
-      points: 0
+      points: 0,
+      headToHeadWins: {} // Track head-to-head wins against each opponent
     });
   });
 
@@ -45,30 +46,90 @@ function calculateGroupStandings(group) {
           p1Stats.matchesWon++;
           p1Stats.points += 3;
           p2Stats.matchesLost++;
+          // Track head-to-head
+          if (!p1Stats.headToHeadWins[match.player2?.id]) {
+            p1Stats.headToHeadWins[match.player2?.id] = 0;
+          }
+          p1Stats.headToHeadWins[match.player2?.id]++;
         } else if (match.result.winner === match.player2?.id) {
           p2Stats.matchesWon++;
           p2Stats.points += 3;
           p1Stats.matchesLost++;
+          // Track head-to-head
+          if (!p2Stats.headToHeadWins[match.player1?.id]) {
+            p2Stats.headToHeadWins[match.player1?.id] = 0;
+          }
+          p2Stats.headToHeadWins[match.player1?.id]++;
         }
         
-        // Update averages - use the match average which is already calculated as average of leg averages
-        if (match.result.player1Stats?.average) {
-          p1Stats.average = match.result.player1Stats.average;
+        // Accumulate totalScore and totalDarts for cumulative average calculation
+        if (match.result.player1Stats?.totalScore !== undefined) {
+          p1Stats.totalScore += match.result.player1Stats.totalScore || 0;
         }
-        if (match.result.player2Stats?.average) {
-          p2Stats.average = match.result.player2Stats.average;
+        if (match.result.player1Stats?.totalDarts !== undefined) {
+          p1Stats.dartsThrown += match.result.player1Stats.totalDarts || 0;
+        }
+        if (match.result.player2Stats?.totalScore !== undefined) {
+          p2Stats.totalScore += match.result.player2Stats.totalScore || 0;
+        }
+        if (match.result.player2Stats?.totalDarts !== undefined) {
+          p2Stats.dartsThrown += match.result.player2Stats.totalDarts || 0;
         }
       }
     }
   });
 
-  // Convert to array (averages are already calculated from match results)
+  // Calculate cumulative averages for all players
+  playerStats.forEach((stats) => {
+    if (stats.dartsThrown > 0) {
+      stats.average = (stats.totalScore / stats.dartsThrown) * 3;
+    } else {
+      stats.average = 0;
+    }
+  });
+
+  // Convert to array
   const standings = Array.from(playerStats.values());
 
-  // Sort by points (descending), then by leg difference (descending)
+  // Use provided criteria order or default
+  const order = criteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'];
+  
+  // Sort standings according to criteria order
   standings.sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    return (b.legsWon - b.legsLost) - (a.legsWon - a.legsLost);
+    for (const criterion of order) {
+      let comparison = 0;
+      
+      switch (criterion) {
+        case 'matchesWon':
+          comparison = b.matchesWon - a.matchesWon;
+          break;
+        case 'legDifference':
+          const legDiffA = a.legsWon - a.legsLost;
+          const legDiffB = b.legsWon - b.legsLost;
+          comparison = legDiffB - legDiffA;
+          break;
+        case 'average':
+          comparison = (b.average || 0) - (a.average || 0);
+          break;
+        case 'headToHead':
+          // Compare head-to-head: if players played each other, check who won more matches
+          const aWinsVsB = a.headToHeadWins[b.player.id] || 0;
+          const bWinsVsA = b.headToHeadWins[a.player.id] || 0;
+          comparison = bWinsVsA - aWinsVsB;
+          break;
+        default:
+          comparison = 0;
+      }
+      
+      // If this criterion shows a difference, return the comparison
+      if (comparison !== 0) {
+        return comparison;
+      }
+      // Otherwise, continue to next criterion
+    }
+    
+    // If all criteria are equal, maintain current order (stable sort)
+    return 0;
   });
 
   return standings;
@@ -79,7 +140,6 @@ export const tournamentService = {
   // Create a new tournament
   async createTournament(tournamentData) {
     try {
-      console.log('📝 Creating tournament:', tournamentData.name)
       
       const tournamentId = tournamentData.id
       
@@ -96,6 +156,12 @@ export const tournamentService = {
           name: tournamentData.name,
           legs_to_win: tournamentData.legsToWin || 3,
           starting_score: tournamentData.startingScore || 501,
+          group_settings: tournamentData.groupSettings ? {
+            ...tournamentData.groupSettings,
+            standingsCriteriaOrder: tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead']
+          } : {
+            standingsCriteriaOrder: tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead']
+          },
           playoff_settings: tournamentData.playoffSettings || null,
           playoffs: tournamentData.playoffs || null,
           user_id: user.id,
@@ -109,7 +175,6 @@ export const tournamentService = {
         throw tournamentError
       }
 
-      console.log('✅ Tournament created:', tournament.name)
 
       // Create/update players and map old IDs to new IDs
       const playerIdMap = new Map() // oldId -> newId
@@ -235,6 +300,19 @@ export const tournamentService = {
 
       return {
         ...tournament,
+        id: tournament.id,
+        name: tournament.name,
+        status: tournament.status,
+        legsToWin: tournament.legs_to_win,
+        startingScore: tournament.starting_score,
+        groupSettings: tournament.group_settings || {
+          standingsCriteriaOrder: tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead']
+        },
+        playoffSettings: tournament.playoff_settings,
+        playoffs: tournament.playoffs,
+        standingsCriteriaOrder: tournament.group_settings?.standingsCriteriaOrder || tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+        createdAt: tournament.created_at,
+        updatedAt: tournament.updated_at,
         players: tournamentData.players.map(player => ({
           ...player,
           id: playerIdMap.get(player.id)
@@ -264,60 +342,10 @@ export const tournamentService = {
         }))
       }
 
-      console.log('Tournament creation completed successfully, returning:', {
-        id: tournament.id,
-        name: tournament.name,
-        status: tournament.status
-      });
-
-      return {
-        id: tournament.id,
-        name: tournament.name,
-        status: tournament.status,
-        legsToWin: tournament.legs_to_win,
-        startingScore: tournament.starting_score,
-        playoffSettings: tournament.playoff_settings,
-        playoffs: tournament.playoffs,
-        createdAt: tournament.created_at,
-        updatedAt: tournament.updated_at,
-        players: tournamentData.players.map(player => ({
-          ...player,
-          id: playerIdMap.get(player.id)
-        })),
-        groups: tournamentData.groups.map(group => ({
-          ...group,
-          players: group.players.map(player => {
-            const newId = playerIdMap.get(player.id);
-            console.log('Mapping player:', player.name, 'from', player.id, 'to', newId);
-            return {
-              ...player,
-              id: newId || player.id // Fallback to original ID if mapping fails
-            };
-          }),
-          matches: group.matches.map(match => {
-            console.log('Transforming match:', match, 'playerIdMap:', playerIdMap);
-            return {
-              ...match,
-              legsToWin: tournamentData.legsToWin || 3,
-              startingScore: tournamentData.startingScore || 501,
-              player1: match.player1 ? {
-                ...match.player1,
-                id: playerIdMap.get(match.player1.id) || match.player1.id
-              } : null,
-              player2: match.player2 ? {
-                ...match.player2,
-                id: playerIdMap.get(match.player2.id) || match.player2.id
-              } : null
-            };
-          })
-        }))
-      };
-
     } catch (error) {
       console.error('Error creating tournament:', error)
       
       // If Supabase fails, return a local tournament structure for fallback
-      console.log('Falling back to local tournament creation')
       return {
         id: generateId(),
         name: tournamentData.name,
@@ -388,10 +416,22 @@ export const tournamentService = {
 
       if (statsError) throw statsError
 
-      console.log('Raw data from Supabase:', { tournaments, allPlayers, allMatches, allGroups, matchPlayerStats })
 
       // Transform data to match our app structure
       return tournaments.map(tournament => {
+        // Parse group_settings if it's a string (JSONB from Supabase might be string)
+        let groupSettings = tournament.group_settings;
+        if (typeof groupSettings === 'string') {
+          try {
+            groupSettings = JSON.parse(groupSettings);
+          } catch (e) {
+            console.error('Error parsing group_settings:', e);
+            groupSettings = {};
+          }
+        }
+        
+        // Extract standingsCriteriaOrder from groupSettings
+        const standingsCriteriaOrder = groupSettings?.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'];
         // Get tournament players
         const tournamentPlayerIds = tournamentPlayers
           .filter(tp => tp.tournament_id === tournament.id)
@@ -416,7 +456,6 @@ export const tournamentService = {
             const groupMatches = allMatches
               .filter(match => match.group_id === group.id)
               .map(match => {
-                console.log('Fetched match from DB:', match.id, 'Status:', match.status, 'Winner:', match.winner_id);
                 
                 // Get player stats for this match
                 const player1Stats = matchPlayerStats?.find(s => s.match_id === match.id && s.player_id === match.player1_id);
@@ -460,8 +499,8 @@ export const tournamentService = {
               standings: []
             };
 
-            // Calculate standings for this group
-            groupWithData.standings = calculateGroupStandings(groupWithData);
+            // Calculate standings for this group with tournament criteria order
+            groupWithData.standings = calculateGroupStandings(groupWithData, standingsCriteriaOrder);
 
             return groupWithData;
           })
@@ -470,7 +509,6 @@ export const tournamentService = {
         const playoffMatches = allMatches
           .filter(match => match.is_playoff === true)
           .map(match => {
-            console.log('Fetched playoff match from DB:', match.id, 'Status:', match.status, 'Winner:', match.winner_id);
             return {
               id: match.id,
               player1: playerMap.get(match.player1_id) || null,
@@ -499,6 +537,7 @@ export const tournamentService = {
           playoffSettings: tournament.playoff_settings,
           playoffs: tournament.playoffs,
           playoffMatches: playoffMatches,
+          standingsCriteriaOrder: standingsCriteriaOrder,
           createdAt: tournament.created_at,
           updatedAt: tournament.updated_at,
           players: tournamentPlayersList,
@@ -515,7 +554,6 @@ export const tournamentService = {
   // Get a single tournament
   async getTournament(tournamentId) {
     try {
-      console.log('Fetching tournament with ID:', tournamentId);
       
       const { data: tournament, error } = await supabase
         .from('tournaments')
@@ -545,13 +583,48 @@ export const tournamentService = {
       }
 
       if (!tournament) {
-        console.log('Tournament not found with ID:', tournamentId);
         throw new Error('Tournament not found');
       }
 
-      console.log('Raw tournament data from Supabase:', tournament)
+      // Parse group_settings if it's a string (JSONB from Supabase might be string)
+      let groupSettings = tournament.group_settings;
+      
+      if (typeof groupSettings === 'string') {
+        try {
+          groupSettings = JSON.parse(groupSettings);
+        } catch (e) {
+          console.error('Error parsing group_settings:', e);
+          groupSettings = {};
+        }
+      }
 
       // Transform data to match our app structure
+        // Get match player stats for all matches in this tournament
+        const allMatchIds = tournament.groups.flatMap(group => 
+          group.matches.map(match => match.id)
+        );
+        
+        let matchPlayerStatsMap = new Map();
+        if (allMatchIds.length > 0) {
+          const { data: matchPlayerStats, error: statsError } = await supabase
+            .from('match_player_stats')
+            .select('*')
+            .in('match_id', allMatchIds);
+          
+          if (statsError) {
+            console.error('Error fetching match player stats:', statsError);
+          } else {
+            // Create a map: match_id -> { player1_id: stats, player2_id: stats }
+            matchPlayerStats?.forEach(stat => {
+              if (!matchPlayerStatsMap.has(stat.match_id)) {
+                matchPlayerStatsMap.set(stat.match_id, {});
+              }
+              const matchStats = matchPlayerStatsMap.get(stat.match_id);
+              matchStats[stat.player_id] = stat;
+            });
+          }
+        }
+        
         // Get playoff matches for this tournament
         const { data: playoffMatchesData, error: playoffMatchesError } = await supabase
           .from('matches')
@@ -593,6 +666,7 @@ export const tournamentService = {
           playoffSettings: tournament.playoff_settings,
           playoffs: tournament.playoffs,
           playoffMatches: playoffMatches,
+          standingsCriteriaOrder: groupSettings?.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
           createdAt: tournament.created_at,
           updatedAt: tournament.updated_at,
           players: tournament.tournament_players.map(tp => tp.player),
@@ -601,25 +675,43 @@ export const tournamentService = {
             id: group.id,
             name: group.name,
             players: group.group_players.map(gp => gp.player),
-            matches: group.matches.map(match => ({
-              id: match.id,
-              player1: match.player1 || null,
-              player2: match.player2 || null,
-              status: match.status,
-              legsToWin: match.legs_to_win,
-              startingScore: match.starting_score,
-              startedByUserId: match.started_by_user_id,
-              result: match.winner_id ? {
-                winner: match.winner_id,
-                player1Legs: match.player1_legs,
-                player2Legs: match.player2_legs
-              } : null
-            })),
+            matches: group.matches.map(match => {
+              // Get player stats for this match
+              const matchStats = matchPlayerStatsMap.get(match.id) || {};
+              const player1StatsData = match.player1?.id ? matchStats[match.player1.id] : null;
+              const player2StatsData = match.player2?.id ? matchStats[match.player2.id] : null;
+              
+              return {
+                id: match.id,
+                player1: match.player1 || null,
+                player2: match.player2 || null,
+                status: match.status,
+                legsToWin: match.legs_to_win,
+                startingScore: match.starting_score,
+                startedByUserId: match.started_by_user_id,
+                result: match.winner_id ? {
+                  winner: match.winner_id,
+                  player1Legs: match.player1_legs,
+                  player2Legs: match.player2_legs,
+                  player1Stats: player1StatsData ? {
+                    totalScore: player1StatsData.total_score || 0,
+                    totalDarts: player1StatsData.total_darts || 0,
+                    average: player1StatsData.average ? parseFloat(player1StatsData.average) : 0
+                  } : null,
+                  player2Stats: player2StatsData ? {
+                    totalScore: player2StatsData.total_score || 0,
+                    totalDarts: player2StatsData.total_darts || 0,
+                    average: player2StatsData.average ? parseFloat(player2StatsData.average) : 0
+                  } : null
+                } : null
+              };
+            }),
             standings: []
           };
 
-          // Calculate standings for this group
-          groupWithData.standings = calculateGroupStandings(groupWithData);
+          // Calculate standings for this group with tournament criteria order
+          const criteriaOrder = groupSettings?.standingsCriteriaOrder || null;
+          groupWithData.standings = calculateGroupStandings(groupWithData, criteriaOrder);
 
           return groupWithData;
         })
@@ -634,7 +726,6 @@ export const tournamentService = {
   // Start tournament (generate groups and matches)
   async startTournament(tournamentId, groupSettings) {
     try {
-      console.log('Starting tournament:', tournamentId, 'with settings:', groupSettings);
       
       // Get current tournament data
       const { data: tournament, error: tournamentError } = await supabase
@@ -719,7 +810,6 @@ export const tournamentService = {
 
       if (updateError) throw updateError;
 
-      console.log('Tournament started successfully:', updatedTournament);
       
       // Return the complete tournament data by fetching it again
       const completeTournament = await this.getTournament(tournamentId);
@@ -785,7 +875,6 @@ export const tournamentService = {
   // Add player to tournament
   async addPlayerToTournament(tournamentId, playerName) {
     try {
-      console.log('Adding player to tournament:', tournamentId, playerName);
       
       // Check if tournament is still open for registration
       const { data: tournament, error: tournamentError } = await supabase
@@ -836,7 +925,6 @@ export const tournamentService = {
 
       if (tpError) throw tpError;
 
-      console.log('Player added successfully:', tournamentPlayer);
       return tournamentPlayer.player;
 
     } catch (error) {
@@ -888,7 +976,6 @@ export const tournamentService = {
   async updateTournamentPlayoffs(tournamentId, playoffsData) {
     try {
       // Don't create playoff matches automatically - they will be created when matches are started
-      console.log('Playoff data updated - matches will be created when started');
 
       // Then update the tournament playoffs data
       const { data, error } = await supabase
@@ -906,7 +993,6 @@ export const tournamentService = {
         throw error;
       }
 
-      console.log('Tournament playoffs updated successfully:', data);
       return data;
     } catch (error) {
       console.error('Error updating tournament playoffs:', error);
@@ -917,17 +1003,39 @@ export const tournamentService = {
   // Update tournament settings
   async updateTournamentSettings(tournamentId, settings) {
     try {
-      console.log('Updating tournament settings:', tournamentId, settings);
 
+      // First, get the current tournament to preserve existing group_settings
+      const { data: currentTournament, error: fetchError } = await supabase
+        .from('tournaments')
+        .select('group_settings')
+        .eq('id', tournamentId)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching current tournament:', fetchError);
+        throw fetchError;
+      }
+
+      // Merge existing group_settings with new settings, ensuring standingsCriteriaOrder is set
+      const existingGroupSettings = currentTournament?.group_settings || {};
+      const groupSettingsWithCriteria = {
+        ...existingGroupSettings,
+        ...settings.groupSettings,
+        standingsCriteriaOrder: settings.standingsCriteriaOrder || existingGroupSettings.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead']
+      };
+      
+      
+      const updateData = {
+        legs_to_win: settings.legsToWin,
+        starting_score: settings.startingScore,
+        playoff_settings: settings.playoffSettings,
+        group_settings: groupSettingsWithCriteria,
+        updated_at: new Date().toISOString()
+      };
+      
       const { data, error } = await supabase
         .from('tournaments')
-        .update({
-          legs_to_win: settings.legsToWin,
-          starting_score: settings.startingScore,
-          playoff_settings: settings.playoffSettings,
-          group_settings: settings.groupSettings,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', tournamentId)
         .select()
         .single();
@@ -937,7 +1045,6 @@ export const tournamentService = {
         throw error;
       }
 
-      console.log('Tournament settings updated successfully:', data);
       return data;
 
     } catch (error) {
@@ -952,7 +1059,6 @@ export const matchService = {
   // Update match with user who started it (or create it if it doesn't exist for playoff matches)
   async startMatch(matchId, userId, matchData = null) {
     try {
-      console.log('matchService.startMatch called with:', matchId, userId, matchData);
       
       // First, try to update the existing match
       const { data: existingMatch, error: updateError } = await supabase
@@ -973,19 +1079,11 @@ export const matchService = {
 
       // If match exists, return the updated data
       if (existingMatch) {
-        console.log('Match updated successfully:', existingMatch);
         return existingMatch;
       }
 
       // If match doesn't exist and we have matchData (for playoff matches), create it
       if (matchData) {
-        console.log('Match not found, creating new playoff match:', matchId);
-        console.log('Match data:', {
-          player1: matchData.player1,
-          player2: matchData.player2,
-          player1Id: matchData.player1?.id,
-          player2Id: matchData.player2?.id
-        });
         
         const { data: newMatch, error: createError } = await supabase
           .from('matches')
@@ -1007,7 +1105,6 @@ export const matchService = {
         if (createError) {
           // If it's a duplicate key error, the match was already created by another call
           if (createError.code === '23505') {
-            console.log('Match already exists (duplicate key), fetching existing match...');
             const { data: existingMatch, error: fetchError } = await supabase
               .from('matches')
               .select('*')
@@ -1019,7 +1116,6 @@ export const matchService = {
               throw fetchError;
             }
             
-            console.log('Retrieved existing match:', existingMatch);
             return existingMatch;
           } else {
             console.error('Error creating playoff match:', createError);
@@ -1027,7 +1123,6 @@ export const matchService = {
           }
         }
 
-        console.log('Playoff match created successfully:', newMatch);
         return newMatch;
       }
 
@@ -1074,14 +1169,15 @@ export const matchService = {
         })
         .eq('id', matchId)
         .select()
-        .single()
 
       if (error) throw error
-      return data
+      // Return first match if found, or null if not found (match might already be completed)
+      return data && data.length > 0 ? data[0] : null
 
     } catch (error) {
       console.error('Error ending live match:', error)
-      throw error
+      // Don't throw error - it's okay if the match doesn't exist or is already completed
+      return null
     }
   },
 
@@ -1142,23 +1238,40 @@ export const matchService = {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError) {
         console.error('Auth error:', authError);
+        // If auth session is missing, try to get the session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+          console.error('No auth session available:', sessionError);
+          throw new Error('Authentication required to complete match. Please log in again.');
+        }
+      }
+      
+      if (!user) {
+        console.error('No authenticated user found');
+        throw new Error('Authentication required to complete match. Please log in again.');
       }
       
       // Update the match with results
       
-      const { data: updatedMatch, error: matchError } = await supabase
+      const updateData = {
+        status: 'completed',
+        winner_id: matchResult.winner,
+        player1_legs: matchResult.player1Legs,
+        player2_legs: matchResult.player2Legs,
+        updated_at: new Date().toISOString(),
+        // Clear live match tracking fields
+        live_device_id: null,
+        live_started_at: null,
+        last_activity_at: new Date().toISOString()
+      };
+      
+      console.log('Updating match with data:', updateData);
+      
+      const { data: updatedMatches, error: matchError } = await supabase
         .from('matches')
-        .update({
-          status: 'completed',
-          winner_id: matchResult.winner,
-          player1_legs: matchResult.player1Legs,
-          player2_legs: matchResult.player2Legs,
-          result: matchResult, // Save the full match result including player stats and averages
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', matchResult.matchId)
         .select()
-        .single()
 
       if (matchError) {
         console.error('=== DATABASE ERROR ===');
@@ -1175,13 +1288,65 @@ export const matchService = {
       }
       
       // Check if the update actually affected any rows
-      if (!updatedMatch) {
+      if (!updatedMatches || updatedMatches.length === 0) {
         console.error('=== NO ROWS UPDATED ===');
         console.error('Update returned no data - possible RLS policy blocking update');
         console.error('Match ID:', matchResult.matchId);
-        throw new Error('No rows were updated - possible RLS policy issue');
+        
+        // Check if match exists
+        const { data: checkMatch, error: checkError } = await supabase
+          .from('matches')
+          .select('id, status')
+          .eq('id', matchResult.matchId)
+          .single();
+        
+        if (checkError) {
+          console.error('Error checking match existence:', checkError);
+          throw new Error(`Match not found or RLS policy blocking: ${checkError.message}`);
+        }
+        
+        if (checkMatch) {
+          console.log('Match exists with status:', checkMatch.status);
+          // If match exists but update didn't work, it's likely an RLS issue
+          throw new Error(`RLS policy blocking update. Match exists with status: ${checkMatch.status}`);
+        } else {
+          throw new Error('Match not found in database');
+        }
       }
+      
+      const updatedMatch = updatedMatches[0];
       console.log('✅ Match completed:', updatedMatch?.id, 'Winner:', updatedMatch?.winner_id);
+      console.log('✅ Match status after update:', updatedMatch?.status);
+      
+      // Verify the status was actually updated
+      if (updatedMatch?.status !== 'completed') {
+        console.error('⚠️ WARNING: Match status was not updated to completed!', {
+          matchId: updatedMatch?.id,
+          actualStatus: updatedMatch?.status,
+          expectedStatus: 'completed'
+        });
+        throw new Error(`Match status was not updated to completed. Actual status: ${updatedMatch?.status}`);
+      }
+      
+      // Double-check by fetching the match again to verify it was saved
+      const { data: verifyMatch, error: verifyError } = await supabase
+        .from('matches')
+        .select('id, status, winner_id')
+        .eq('id', matchResult.matchId)
+        .single();
+      
+      if (verifyError) {
+        console.error('Error verifying match status:', verifyError);
+      } else {
+        console.log('✅ Verified match status from database:', verifyMatch?.status);
+        if (verifyMatch?.status !== 'completed') {
+          console.error('⚠️ CRITICAL: Match status verification failed!', {
+            matchId: verifyMatch?.id,
+            actualStatus: verifyMatch?.status,
+            expectedStatus: 'completed'
+          });
+        }
+      }
       
       // Save player statistics to match_player_stats table
       const statsPromises = [];
@@ -1297,6 +1462,9 @@ export const matchService = {
       if (statsError) throw statsError
 
       console.log('✅ Match result saved to database')
+      console.log('✅ Final match status:', updatedMatch?.status)
+      
+      // Return the updated match with verified status
       return updatedMatch
 
     } catch (error) {
@@ -1305,3 +1473,4 @@ export const matchService = {
     }
   }
 };
+

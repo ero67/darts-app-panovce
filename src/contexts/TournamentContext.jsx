@@ -62,25 +62,99 @@ function tournamentReducer(state, action) {
       }
       
       const updatedTournament = { ...state.currentTournament };
-      const group = updatedTournament.groups?.find(g => g.id === action.payload.groupId);
+      const matchResult = action.payload;
       
-      if (!group) {
-        console.error('Group not found for match completion:', action.payload.groupId);
-        return state;
+      // Check if this is a playoff match
+      if (matchResult.isPlayoff && matchResult.playoffRound) {
+        
+        // Find the playoff match in the rounds
+        if (updatedTournament.playoffs && updatedTournament.playoffs.rounds) {
+          const rounds = updatedTournament.playoffs.rounds;
+          let foundMatch = null;
+          let foundRoundIndex = -1;
+          let foundMatchIndex = -1;
+          
+          // Find the match in playoff rounds
+          for (let roundIndex = 0; roundIndex < rounds.length; roundIndex++) {
+            const round = rounds[roundIndex];
+            if (round.matches) {
+              const matchIndex = round.matches.findIndex(m => m.id === matchResult.matchId);
+              if (matchIndex !== -1) {
+                foundMatch = round.matches[matchIndex];
+                foundRoundIndex = roundIndex;
+                foundMatchIndex = matchIndex;
+                break;
+              }
+            }
+          }
+          
+          if (foundMatch) {
+            // Update the match status
+            foundMatch.status = 'completed';
+            foundMatch.result = matchResult;
+            
+            // Get the winner player object
+            const winnerId = matchResult.winner;
+            const winnerPlayer = matchResult.winner === matchResult.player1Id 
+              ? { id: matchResult.player1Id, name: foundMatch.player1?.name }
+              : { id: matchResult.player2Id, name: foundMatch.player2?.name };
+            
+            
+            // Advance winner to next round if not the final
+            if (foundRoundIndex < rounds.length - 1) {
+              const nextRound = rounds[foundRoundIndex + 1];
+              if (nextRound && nextRound.matches) {
+                // Determine which match in next round this winner should go to
+                // In a bracket: matches 0-1 -> match 0, matches 2-3 -> match 1, etc.
+                const nextMatchIndex = Math.floor(foundMatchIndex / 2);
+                const nextMatch = nextRound.matches[nextMatchIndex];
+                
+                if (nextMatch) {
+                  // Determine if winner should be player1 or player2 in next match
+                  // First match of pair (0, 2, 4...) -> player1, second match (1, 3, 5...) -> player2
+                  const isFirstMatchOfPair = (foundMatchIndex % 2 === 0);
+                  if (isFirstMatchOfPair) {
+                    nextMatch.player1 = winnerPlayer;
+                  } else {
+                    nextMatch.player2 = winnerPlayer;
+                  }
+                  
+                  // Update match status if both players are set
+                  if (nextMatch.player1 && nextMatch.player2) {
+                    nextMatch.status = 'pending';
+                  }
+                  
+                } else {
+                  console.error('Next match not found:', nextMatchIndex, 'in round:', nextRound.name);
+                }
+              }
+            }
+          } else {
+            console.error('Playoff match not found in rounds:', matchResult.matchId);
+          }
+        }
+      } else {
+        // Regular group match
+        const group = updatedTournament.groups?.find(g => g.id === matchResult.groupId);
+        
+        if (!group) {
+          console.error('Group not found for match completion:', matchResult.groupId);
+          return state;
+        }
+        
+        const match = group.matches?.find(m => m.id === matchResult.matchId);
+        
+        if (!match) {
+          console.error('Match not found for completion:', matchResult.matchId);
+          return state;
+        }
+        
+        match.result = matchResult;
+        match.status = 'completed';
+        
+        // Update group standings with tournament settings
+        updateGroupStandings(group, updatedTournament);
       }
-      
-      const match = group.matches?.find(m => m.id === action.payload.matchId);
-      
-      if (!match) {
-        console.error('Match not found for completion:', action.payload.matchId);
-        return state;
-      }
-      
-      match.result = action.payload;
-      match.status = 'completed';
-      
-      // Update group standings
-      updateGroupStandings(group);
       
       // Update tournament in tournaments array
       const updatedTournaments = state.tournaments.map(t => 
@@ -137,7 +211,7 @@ function tournamentReducer(state, action) {
 }
 
 // Helper function to update group standings
-function updateGroupStandings(group) {
+function updateGroupStandings(group, tournament = null) {
   if (!group || !group.players || !group.matches) {
     console.error('Invalid group data for standings update:', group);
     return;
@@ -155,8 +229,11 @@ function updateGroupStandings(group) {
         matchesLost: 0,
         legsWon: 0,
         legsLost: 0,
+        totalScore: 0,
+        dartsThrown: 0,
         average: 0,
-        points: 0
+        points: 0,
+        headToHeadWins: {} // Track head-to-head wins against each opponent
       };
     }
   });
@@ -180,10 +257,20 @@ function updateGroupStandings(group) {
         p1Stats.matchesWon++;
         p2Stats.matchesLost++;
         p1Stats.points += 3;
+        // Track head-to-head
+        if (!p1Stats.headToHeadWins[player2.id]) {
+          p1Stats.headToHeadWins[player2.id] = 0;
+        }
+        p1Stats.headToHeadWins[player2.id]++;
       } else {
         p2Stats.matchesWon++;
         p1Stats.matchesLost++;
         p2Stats.points += 3;
+        // Track head-to-head
+        if (!p2Stats.headToHeadWins[player1.id]) {
+          p2Stats.headToHeadWins[player1.id] = 0;
+        }
+        p2Stats.headToHeadWins[player1.id]++;
       }
       
       p1Stats.legsWon += result.player1Legs || 0;
@@ -191,20 +278,72 @@ function updateGroupStandings(group) {
       p2Stats.legsWon += result.player2Legs || 0;
       p2Stats.legsLost += result.player1Legs || 0;
       
-      // Update averages - use the match average which is already calculated as average of leg averages
-      if (result.player1Stats?.average) {
-        p1Stats.average = result.player1Stats.average;
+      // Accumulate totalScore and totalDarts for cumulative average calculation
+      if (result.player1Stats?.totalScore !== undefined) {
+        p1Stats.totalScore = (p1Stats.totalScore || 0) + (result.player1Stats.totalScore || 0);
       }
-      if (result.player2Stats?.average) {
-        p2Stats.average = result.player2Stats.average;
+      if (result.player1Stats?.totalDarts !== undefined) {
+        p1Stats.dartsThrown = (p1Stats.dartsThrown || 0) + (result.player1Stats.totalDarts || 0);
+      }
+      if (result.player2Stats?.totalScore !== undefined) {
+        p2Stats.totalScore = (p2Stats.totalScore || 0) + (result.player2Stats.totalScore || 0);
+      }
+      if (result.player2Stats?.totalDarts !== undefined) {
+        p2Stats.dartsThrown = (p2Stats.dartsThrown || 0) + (result.player2Stats.totalDarts || 0);
       }
     }
   });
 
-  // Sort standings by points, then by leg difference
+  // Calculate cumulative averages for all players
+  Object.values(standings).forEach((stats) => {
+    if (stats.dartsThrown > 0) {
+      stats.average = (stats.totalScore / stats.dartsThrown) * 3;
+    } else {
+      stats.average = 0;
+    }
+  });
+
+  // Get criteria order from tournament settings or use default
+  const criteriaOrder = tournament?.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'];
+  console.log('updateGroupStandings - tournament?.standingsCriteriaOrder:', tournament?.standingsCriteriaOrder);
+  console.log('updateGroupStandings - Using criteriaOrder:', criteriaOrder);
+  
+  // Sort standings according to criteria order
   group.standings = Object.values(standings).sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    return (b.legsWon - b.legsLost) - (a.legsWon - a.legsLost);
+    for (const criterion of criteriaOrder) {
+      let comparison = 0;
+      
+      switch (criterion) {
+        case 'matchesWon':
+          comparison = b.matchesWon - a.matchesWon;
+          break;
+        case 'legDifference':
+          const legDiffA = a.legsWon - a.legsLost;
+          const legDiffB = b.legsWon - b.legsLost;
+          comparison = legDiffB - legDiffA;
+          break;
+        case 'average':
+          comparison = (b.average || 0) - (a.average || 0);
+          break;
+        case 'headToHead':
+          // Compare head-to-head: if players played each other, check who won more matches
+          const aWinsVsB = a.headToHeadWins[b.player.id] || 0;
+          const bWinsVsA = b.headToHeadWins[a.player.id] || 0;
+          comparison = bWinsVsA - aWinsVsB;
+          break;
+        default:
+          comparison = 0;
+      }
+      
+      // If this criterion shows a difference, return the comparison
+      if (comparison !== 0) {
+        return comparison;
+      }
+      // Otherwise, continue to next criterion
+    }
+    
+    // If all criteria are equal, maintain current order (stable sort)
+    return 0;
   });
 }
 
@@ -273,18 +412,35 @@ export function TournamentProvider({ children }) {
   };
 
   const completeMatch = async (matchResult) => {
-    console.log('TournamentContext.completeMatch called with:', matchResult);
     try {
       // Save to Supabase first
       await matchService.saveMatchResult(matchResult);
-      console.log('Match result saved to Supabase successfully');
     } catch (error) {
       console.error('Error saving match result to Supabase:', error);
       // Continue with local update even if Supabase fails
     }
     
-    // Update local state
+    // Update local state first
     dispatch({ type: ACTIONS.COMPLETE_MATCH, payload: matchResult });
+    
+    // If this is a playoff match, save updated playoff rounds to database
+    // Use setTimeout to ensure state is updated after dispatch
+    if (matchResult.isPlayoff) {
+      setTimeout(async () => {
+        try {
+          // Get the updated tournament from state after dispatch
+          const currentState = state;
+          if (currentState.currentTournament?.playoffs) {
+            await tournamentService.updateTournamentPlayoffs(
+              currentState.currentTournament.id,
+              currentState.currentTournament.playoffs
+            );
+          }
+        } catch (error) {
+          console.error('Error updating playoff rounds in database:', error);
+        }
+      }, 200);
+    }
   };
 
   const deleteTournament = async (tournamentId) => {
@@ -306,7 +462,6 @@ export function TournamentProvider({ children }) {
     try {
       // Save playoff data to Supabase
       await tournamentService.updateTournamentPlayoffs(state.currentTournament.id, playoffsData);
-      console.log('Playoff data saved to Supabase successfully');
     } catch (error) {
       console.error('Error saving playoff data to Supabase:', error);
     }
@@ -352,7 +507,9 @@ export function TournamentProvider({ children }) {
 
   const updateTournamentSettings = async (tournamentId, settings) => {
     try {
-      const updatedTournament = await tournamentService.updateTournamentSettings(tournamentId, settings);
+      await tournamentService.updateTournamentSettings(tournamentId, settings);
+      // Reload the full tournament to get all data including groups
+      const updatedTournament = await tournamentService.getTournament(tournamentId);
       dispatch({ type: ACTIONS.SELECT_TOURNAMENT, payload: updatedTournament });
       return updatedTournament;
     } catch (error) {
@@ -376,12 +533,6 @@ export function TournamentProvider({ children }) {
     updateTournamentSettings
   };
 
-  // Debug: Log available functions
-  console.log('TournamentContext value functions:', {
-    updateTournamentSettings: typeof updateTournamentSettings,
-    startTournament: typeof startTournament,
-    addPlayerToTournament: typeof addPlayerToTournament
-  });
 
   return (
     <TournamentContext.Provider value={value}>

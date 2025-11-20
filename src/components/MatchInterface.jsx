@@ -51,11 +51,11 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     
     return {
       currentLeg: 1,
-      currentPlayer: 0,
+      currentPlayer: null, // null means match hasn't started yet
       matchStarter: null,
       legScores: {
-        player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legAverages: [], checkouts: [] },
-        player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legAverages: [], checkouts: [] }
+        player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] },
+        player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] }
       },
       currentTurn: {
         score: 0,
@@ -72,11 +72,11 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
 
   const initialState = getInitialState();
   const [currentLeg, setCurrentLeg] = useState(initialState?.currentLeg || 1);
-  const [currentPlayer, setCurrentPlayer] = useState(initialState?.currentPlayer || 0);
+  const [currentPlayer, setCurrentPlayer] = useState(initialState?.currentPlayer !== undefined ? initialState.currentPlayer : null);
   const [matchStarter, setMatchStarter] = useState(initialState?.matchStarter || null);
   const [legScores, setLegScores] = useState(initialState?.legScores || {
-    player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legAverages: [], checkouts: [] },
-    player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legAverages: [], checkouts: [] }
+    player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] },
+    player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] }
   });
   const [currentTurn, setCurrentTurn] = useState(initialState?.currentTurn || {
     score: 0,
@@ -91,14 +91,94 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   const [isRemovingDart, setIsRemovingDart] = useState(false); // Prevent rapid clicks
 
   // Only show match starter dialog if it's a new match and no match starter has been chosen
+  // This effect is now mainly for cases where the state changes after initial load
   useEffect(() => {
-    if (currentLeg === 1 && matchStarter === null && !matchComplete) {
-      setShowMatchStarter(true);
+    // Don't show if currentPlayer is already set (match has started)
+    if (currentPlayer !== null && currentPlayer !== undefined) {
+      setShowMatchStarter(false);
+      return;
     }
-  }, [currentLeg, matchStarter, matchComplete]);
+    
+    // Only show if we explicitly set showMatchStarter to true (from database check)
+    // Don't auto-show if match is already in progress
+    if (currentLeg === 1 && matchStarter === null && !matchComplete && showMatchStarter === false) {
+      // Check if match has any progress (legs won, scores changed, etc.)
+      const hasProgress = legScores.player1.legs > 0 || 
+                         legScores.player2.legs > 0 ||
+                         legScores.player1.currentScore !== matchSettings.startingScore ||
+                         legScores.player2.currentScore !== matchSettings.startingScore ||
+                         turnHistory.length > 0;
+      
+      // Only show if there's no progress
+      if (!hasProgress) {
+        setShowMatchStarter(true);
+      }
+    }
+  }, [currentLeg, matchStarter, matchComplete, legScores, turnHistory, matchSettings.startingScore, showMatchStarter, currentPlayer]);
   
   const { startLiveMatch, endLiveMatch, updateLiveMatch, isMatchLiveOnThisDevice } = useLiveMatch();
   const { user } = useAuth();
+
+  // Function to load match state from database
+  const loadMatchStateFromDatabase = async (matchId, startingScore) => {
+    if (!matchId) return null;
+    
+    try {
+      const { data, error } = await supabase
+        .from('matches')
+        .select('current_leg, player1_current_score, player2_current_score, player1_legs, player2_legs, current_player, started_by_user_id')
+        .eq('id', matchId)
+        .single();
+
+      if (error) {
+        console.error('Error loading match state from database:', error);
+        return null;
+      }
+
+      if (data) {
+        // Check if match is already in progress
+        const isInProgress = data.current_leg > 1 || 
+                             data.player1_legs > 0 || 
+                             data.player2_legs > 0 ||
+                             (data.player1_current_score !== null && data.player1_current_score !== startingScore) ||
+                             (data.player2_current_score !== null && data.player2_current_score !== startingScore);
+
+        return {
+          currentLeg: data.current_leg || 1,
+          currentPlayer: data.current_player !== null && data.current_player !== undefined ? data.current_player : 0,
+          legScores: {
+            player1: {
+              legs: data.player1_legs || 0,
+              currentScore: data.player1_current_score !== null && data.player1_current_score !== undefined ? data.player1_current_score : startingScore,
+              totalScore: 0,
+              totalDarts: 0,
+              legDarts: 0,
+              legAverages: [],
+              checkouts: []
+            },
+            player2: {
+              legs: data.player2_legs || 0,
+              currentScore: data.player2_current_score !== null && data.player2_current_score !== undefined ? data.player2_current_score : startingScore,
+              totalScore: 0,
+              totalDarts: 0,
+              legDarts: 0,
+              legAverages: [],
+              checkouts: []
+            }
+          },
+          isInProgress,
+          // If match is in progress, we can infer the match starter from the current player
+          // For leg 1, the match starter is the current player
+          matchStarter: isInProgress && data.current_leg === 1 ? data.current_player : null
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error loading match state from database:', error);
+      return null;
+    }
+  };
 
   // Function to update match state to database
   const updateMatchToDatabase = async (matchId, matchState) => {
@@ -128,23 +208,79 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     }
   };
 
-  // Double-check localStorage on component mount to ensure match starter is loaded
+  // Load match state from database if localStorage is empty or match is in progress
   useEffect(() => {
-    if (match?.id && matchStarter === null) {
+    const loadMatchState = async () => {
+      if (!match?.id) return;
+
       const stored = localStorage.getItem(`match-state-${match.id}`);
+      let hasLocalState = false;
+      
+      // If localStorage has state with currentPlayer or matchStarter, use it
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
-          if (parsed.matchStarter !== null && parsed.matchStarter !== undefined) {
-            setMatchStarter(parsed.matchStarter);
-            setCurrentPlayer(parsed.currentPlayer || parsed.matchStarter);
+          // Check if we have a currentPlayer set (this means match has started)
+          if (parsed.currentPlayer !== null && parsed.currentPlayer !== undefined) {
+            setCurrentPlayer(parsed.currentPlayer);
+            if (parsed.matchStarter !== null && parsed.matchStarter !== undefined) {
+              setMatchStarter(parsed.matchStarter);
+            }
             setShowMatchStarter(false);
+            hasLocalState = true;
+          } else if (parsed.matchStarter !== null && parsed.matchStarter !== undefined) {
+            // If we have matchStarter but no currentPlayer, set currentPlayer from matchStarter
+            setMatchStarter(parsed.matchStarter);
+            setCurrentPlayer(parsed.matchStarter);
+            setShowMatchStarter(false);
+            hasLocalState = true;
           }
         } catch (error) {
           console.error('Error parsing localStorage on mount:', error);
         }
       }
-    }
+
+      // If localStorage doesn't have currentPlayer or matchStarter, check database
+      if (!hasLocalState) {
+        const startingScore = match?.startingScore || matchSettings.startingScore || 501;
+        const dbState = await loadMatchStateFromDatabase(match.id, startingScore);
+        if (dbState) {
+          if (dbState.isInProgress) {
+            // Match is already in progress - restore state from database
+            setCurrentLeg(dbState.currentLeg);
+            setCurrentPlayer(dbState.currentPlayer);
+            setLegScores(dbState.legScores);
+            
+            // If we can determine the match starter, set it
+            if (dbState.matchStarter !== null && dbState.matchStarter !== undefined) {
+              setMatchStarter(dbState.matchStarter);
+            }
+            
+            // Don't show match starter dialog for matches in progress
+            setShowMatchStarter(false);
+            
+            // Save to localStorage
+            const matchState = {
+              currentLeg: dbState.currentLeg,
+              currentPlayer: dbState.currentPlayer,
+              matchStarter: dbState.matchStarter,
+              legScores: dbState.legScores,
+              currentTurn: { score: 0, darts: 0, scores: [], dartCount: 0 },
+              turnHistory: [],
+              matchComplete: false,
+              inputMode: 'single',
+              showMatchStarter: false
+            };
+            localStorage.setItem(`match-state-${match.id}`, JSON.stringify(matchState));
+          } else {
+            // Match is new - show match starter dialog
+            setShowMatchStarter(true);
+          }
+        }
+      }
+    };
+
+    loadMatchState();
   }, [match?.id]); // Only run when match ID changes
 
   // Ensure localStorage is updated when matchStarter changes
@@ -153,9 +289,26 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       const currentState = JSON.parse(localStorage.getItem(`match-state-${match.id}`) || '{}');
       currentState.matchStarter = matchStarter;
       currentState.showMatchStarter = false;
+      // Also ensure currentPlayer is set if not already
+      if (currentState.currentPlayer === null || currentState.currentPlayer === undefined) {
+        currentState.currentPlayer = matchStarter;
+      }
       localStorage.setItem(`match-state-${match.id}`, JSON.stringify(currentState));
     }
   }, [matchStarter, match?.id]);
+
+  // Ensure localStorage is updated immediately when currentPlayer changes
+  useEffect(() => {
+    if (match?.id && !matchComplete) {
+      const currentState = JSON.parse(localStorage.getItem(`match-state-${match.id}`) || '{}');
+      currentState.currentPlayer = currentPlayer;
+      // If currentPlayer is set, match has started, so don't show match starter dialog
+      if (currentPlayer !== null && currentPlayer !== undefined) {
+        currentState.showMatchStarter = false;
+      }
+      localStorage.setItem(`match-state-${match.id}`, JSON.stringify(currentState));
+    }
+  }, [currentPlayer, match?.id, matchComplete]);
 
   // Periodic database sync - update every 30 seconds during active play
   useEffect(() => {
@@ -194,12 +347,20 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     match.player1 || { id: 'player1', name: 'Player 1' },
     match.player2 || { id: 'player2', name: 'Player 2' }
   ];
-  const currentPlayerData = legScores[`player${currentPlayer + 1}`];
+  const currentPlayerData = currentPlayer !== null && currentPlayer !== undefined 
+    ? legScores[`player${currentPlayer + 1}`] 
+    : null;
 
   const dartNumbers = [25, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]; // 25 for bullseye, 0 for miss
 
-  // Start live match when component mounts
+  // Start live match when component mounts (only if match is not completed)
   useEffect(() => {
+    // Don't start live match if match is already completed
+    if (match?.status === 'completed' || matchComplete) {
+      console.log('Match is already completed, skipping live match start');
+      return;
+    }
+    
     const matchData = {
       player1: match.player1,
       player2: match.player2,
@@ -231,8 +392,12 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     };
   }, []);
 
-  // Update live match data whenever match state changes
+  // Update live match data whenever match state changes (only if match is not completed)
   useEffect(() => {
+    if (matchComplete || match?.status === 'completed') {
+      return; // Don't update live match if match is completed
+    }
+    
     if (isMatchLiveOnThisDevice(match.id)) {
       const matchData = {
         player1: match.player1,
@@ -249,6 +414,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
 
   const addScore = (number) => {
     if (currentTurn.darts >= 3) return;
+    if (currentPlayer === null || currentPlayer === undefined || !currentPlayerData) return;
 
     let scoreValue = 0;
     let label = '';
@@ -259,6 +425,11 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       label = 'Miss';
     } else if (number === 25) {
       // Bullseye - single bull (25 points) or double bull (50 points)
+      // Triple 25 is not valid (there's no triple bull on the board)
+      if (inputMode === 'triple') {
+        // Don't allow triple 25 - it's not a valid score
+        return;
+      }
       if (inputMode === 'double') {
         scoreValue = 50;
         label = 'D25';
@@ -317,7 +488,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
 
     // Check for bust immediately
     if (newCurrentScore < 0 || newCurrentScore === 1) {
-      // Bust - show visual feedback and restore score
+      // Bust - show visual feedback, restore score, and switch player
       setTimeout(() => {
         setCurrentTurn(prev => ({
           ...prev,
@@ -333,7 +504,10 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
             currentScore: currentPlayerData.currentScore
           }
         }));
+        // Switch to next player after bust
+        setCurrentPlayer(prev => prev === 0 ? 1 : 0);
       }, 1000);
+      return; // Exit early to prevent auto-finish
     }
 
     // Auto-finish turn when 3 darts are thrown OR when score reaches 0
@@ -486,6 +660,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
           currentScore: prev[`player${currentPlayer + 1}`].currentScore + turnData.score
         }
       }));
+      // Switch to next player after bust
+      setCurrentPlayer(prev => prev === 0 ? 1 : 0);
       return;
     }
 
@@ -508,13 +684,15 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
             currentScore: prev[`player${currentPlayer + 1}`].currentScore + turnData.score
           }
         }));
+        // Switch to next player after bust
+        setCurrentPlayer(prev => prev === 0 ? 1 : 0);
         return;
       }
       
       console.log('Valid checkout: Finished on double');
 
       const checkout = turnData.scores.map(s => s.label).join(' + ');
-      const dartsUsed = currentPlayerData.totalDarts + turnData.darts;
+      const dartsUsed = currentPlayerData.legDarts + turnData.darts;
       
       // Calculate leg average: (501 / darts) * 3
       const legAverage = (matchSettings.startingScore / dartsUsed) * 3;
@@ -528,18 +706,30 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         console.log('Previous legs:', prev[`player${currentPlayer + 1}`].legs);
         console.log('Leg average:', legAverage.toFixed(2), 'Darts used:', dartsUsed);
         
-        return {
+        const updated = {
           ...prev,
           [`player${currentPlayer + 1}`]: {
             ...prev[`player${currentPlayer + 1}`],
             legs: newLegs,
             currentScore: matchSettings.startingScore,
             totalScore: prev[`player${currentPlayer + 1}`].totalScore + (matchSettings.startingScore - currentPlayerData.currentScore),
-            totalDarts: prev[`player${currentPlayer + 1}`].totalDarts + dartsUsed,
+            totalDarts: prev[`player${currentPlayer + 1}`].totalDarts + dartsUsed, // Add to cumulative total
+            legDarts: 0, // Reset leg darts for new leg
             legAverages: newLegAverages,
             checkouts: [...prev[`player${currentPlayer + 1}`].checkouts, { leg: currentLeg, checkout, darts: turnData.darts }]
           }
         };
+        
+        // Update database immediately after leg completion
+        setTimeout(() => {
+          updateMatchToDatabase(match.id, {
+            currentLeg,
+            legScores: updated,
+            currentPlayer
+          });
+        }, 100);
+        
+        return updated;
       });
 
       // Check if match is complete
@@ -556,7 +746,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
             legs: newLegs,
             currentScore: matchSettings.startingScore,
             totalScore: legScores[`player${currentPlayer + 1}`].totalScore + (matchSettings.startingScore - currentPlayerData.currentScore),
-            totalDarts: legScores[`player${currentPlayer + 1}`].totalDarts + dartsUsed,
+            totalDarts: legScores[`player${currentPlayer + 1}`].totalDarts + dartsUsed, // Add to cumulative total
+            legDarts: 0, // Reset leg darts
             legAverages: newLegAverages,
             checkouts: [...legScores[`player${currentPlayer + 1}`].checkouts, { leg: currentLeg, checkout, darts: turnData.darts }]
           }
@@ -566,8 +757,11 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       }
 
       // Start new leg - alternate who starts
+      // Leg 1: matchStarter, Leg 2: other player, Leg 3: matchStarter, etc.
+      const newLegNumber = currentLeg + 1;
       setCurrentLeg(prev => prev + 1);
-      const newLegStarter = matchStarter === 0 ? 1 : 0; // Alternate leg starter based on match starter
+      // Alternate based on leg number: odd legs = matchStarter, even legs = other player
+      const newLegStarter = (newLegNumber % 2 === 1) ? matchStarter : (1 - matchStarter);
       setCurrentPlayer(newLegStarter); // Automatically set current player to leg starter
       
       // Sync to database when new leg starts
@@ -579,25 +773,40 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         });
       }, 100);
       
-      // Reset both players' current scores for new leg
+      // Reset both players' current scores and leg darts for new leg
       setLegScores(prev => ({
         ...prev,
-        player1: { ...prev.player1, currentScore: matchSettings.startingScore },
-        player2: { ...prev.player2, currentScore: matchSettings.startingScore }
+        player1: { ...prev.player1, currentScore: matchSettings.startingScore, legDarts: 0 },
+        player2: { ...prev.player2, currentScore: matchSettings.startingScore, legDarts: 0 }
       }));
 
       // Clear turn history for new leg
       setTurnHistory([]);
     } else {
       // Update total score and dart count (current score already updated by addScore)
-      setLegScores(prev => ({
-        ...prev,
-        [`player${currentPlayer + 1}`]: {
-          ...prev[`player${currentPlayer + 1}`],
-          totalScore: prev[`player${currentPlayer + 1}`].totalScore + turnData.score,
-          totalDarts: prev[`player${currentPlayer + 1}`].totalDarts + turnData.darts
-        }
-      }));
+      setLegScores(prev => {
+        const updated = {
+          ...prev,
+          [`player${currentPlayer + 1}`]: {
+            ...prev[`player${currentPlayer + 1}`],
+            totalScore: prev[`player${currentPlayer + 1}`].totalScore + turnData.score,
+            totalDarts: prev[`player${currentPlayer + 1}`].totalDarts + turnData.darts,
+            legDarts: prev[`player${currentPlayer + 1}`].legDarts + turnData.darts
+          }
+        };
+        
+        // Update database immediately after turn completion (visit = 3 darts)
+        const nextPlayer = currentPlayer === 0 ? 1 : 0;
+        setTimeout(() => {
+          updateMatchToDatabase(match.id, {
+            currentLeg,
+            legScores: updated,
+            currentPlayer: nextPlayer
+          });
+        }, 100);
+        
+        return updated;
+      });
 
       setCurrentPlayer(prev => prev === 0 ? 1 : 0);
     }
@@ -645,19 +854,33 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       return;
     }
     
-    // Calculate match average as the average of leg averages
+    // Set match complete immediately to stop periodic sync
+    setMatchComplete(true);
+    
+    // End live match immediately
+    endLiveMatch(currentMatch.id);
+    
+    // Also end live match in database
+    if (currentMatch?.id) {
+      matchService.endLiveMatch(currentMatch.id).catch(error => {
+        console.error('Error ending live match in database:', error);
+      });
+    }
+    
+    // Calculate match average using the same formula as getAverage: (totalScore / totalDarts) * 3
+    // This works for both players regardless of how many legs they won
     const player1LegAverages = finalLegScores.player1.legAverages || [];
     const player2LegAverages = finalLegScores.player2.legAverages || [];
     
-    const player1MatchAverage = player1LegAverages.length > 0 
-      ? player1LegAverages.reduce((sum, avg) => sum + avg, 0) / player1LegAverages.length 
+    const player1MatchAverage = finalLegScores.player1.totalDarts > 0 
+      ? (finalLegScores.player1.totalScore / finalLegScores.player1.totalDarts) * 3 
       : 0;
-    const player2MatchAverage = player2LegAverages.length > 0 
-      ? player2LegAverages.reduce((sum, avg) => sum + avg, 0) / player2LegAverages.length 
+    const player2MatchAverage = finalLegScores.player2.totalDarts > 0 
+      ? (finalLegScores.player2.totalScore / finalLegScores.player2.totalDarts) * 3 
       : 0;
     
-    console.log('Player 1 leg averages:', player1LegAverages, 'Match average:', player1MatchAverage.toFixed(2));
-    console.log('Player 2 leg averages:', player2LegAverages, 'Match average:', player2MatchAverage.toFixed(2));
+    console.log('Player 1 totalScore:', finalLegScores.player1.totalScore, 'totalDarts:', finalLegScores.player1.totalDarts, 'Match average:', player1MatchAverage.toFixed(2));
+    console.log('Player 2 totalScore:', finalLegScores.player2.totalScore, 'totalDarts:', finalLegScores.player2.totalDarts, 'Match average:', player2MatchAverage.toFixed(2));
     
     const matchResult = {
       matchId: currentMatch.id,
@@ -667,6 +890,9 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       player2Id: currentMatch.player2?.id,
       player1Legs: finalLegScores.player1.legs,
       player2Legs: finalLegScores.player2.legs,
+      isPlayoff: currentMatch.isPlayoff || false,
+      playoffRound: currentMatch.playoffRound,
+      playoffMatchNumber: currentMatch.playoffMatchNumber,
       player1Stats: {
         totalScore: finalLegScores.player1.totalScore,
         totalDarts: finalLegScores.player1.totalDarts,
@@ -684,7 +910,6 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     };
 
     console.log('MatchInterface: Calling onMatchComplete with:', matchResult);
-    setMatchComplete(true);
     onMatchComplete(matchResult);
   };
 
@@ -722,8 +947,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         updateMatchToDatabase(match.id, {
           currentLeg: 1,
           legScores: {
-            player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legAverages: [], checkouts: [] },
-            player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legAverages: [], checkouts: [] }
+            player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] },
+            player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] }
           },
           currentPlayer: playerIndex
         });
@@ -794,7 +1019,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
           <div className="current-score">{legScores.player1.currentScore}</div>
           <div className="player-stats">
             <span>Avg: {getAverage('player1').toFixed(1)}</span>
-            <span>Darts: {legScores.player1.totalDarts}</span>
+            <span>Darts: {legScores.player1.legDarts}</span>
             {currentPlayer === 0 && (
               <div className="current-turn-info">
                 <span>Turn: {currentTurn.score}</span>
@@ -815,7 +1040,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
           <div className="current-score">{legScores.player2.currentScore}</div>
           <div className="player-stats">
             <span>Avg: {getAverage('player2').toFixed(1)}</span>
-            <span>Darts: {legScores.player2.totalDarts}</span>
+            <span>Darts: {legScores.player2.legDarts}</span>
             {currentPlayer === 1 && (
               <div className="current-turn-info">
                 <span>Turn: {currentTurn.score}</span>
@@ -857,7 +1082,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
               key={index}
               className={`dart-btn ${number === 25 ? 'bull' : inputMode === 'triple' ? 'triple' : inputMode === 'double' ? 'double' : 'single'}`}
               onClick={() => addScore(number)}
-              disabled={currentTurn.darts >= 3}
+              disabled={currentTurn.darts >= 3 || (number === 25 && inputMode === 'triple')}
             >
               {number === 0 ? 'Miss' : number === 25 ? '25' : number}
             </button>

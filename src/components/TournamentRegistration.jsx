@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Plus, Users, Play, ArrowLeft, Settings } from 'lucide-react';
+import { Plus, Users, Play, ArrowLeft, Settings, ChevronUp, ChevronDown } from 'lucide-react';
 import { useTournament } from '../contexts/TournamentContext';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function TournamentRegistration({ tournament, onBack }) {
   const { t } = useLanguage();
+  // Ensure players is always an array
+  const players = tournament.players || [];
   const [newPlayerName, setNewPlayerName] = useState('');
   const [showStartTournament, setShowStartTournament] = useState(false);
   const [showEditSettings, setShowEditSettings] = useState(false);
@@ -16,11 +18,36 @@ export function TournamentRegistration({ tournament, onBack }) {
     legsToWin: tournament.legsToWin || 3,
     startingScore: tournament.startingScore || 501,
     groupSettings: groupSettings,
-    playoffSettings: tournament.playoffSettings || {
-      enabled: false,
-      playersPerGroup: 1,
-      playoffLegsToWin: 3
-    }
+    standingsCriteriaOrder: tournament.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+    playoffSettings: (() => {
+      const existing = tournament.playoffSettings;
+      if (existing && existing.legsToWinByRound) {
+        return existing;
+      }
+      // Migrate old structure to new structure
+      if (existing && existing.playoffLegsToWin) {
+        return {
+          ...existing,
+          legsToWinByRound: {
+            16: existing.playoffLegsToWin,
+            8: existing.playoffLegsToWin,
+            4: existing.playoffLegsToWin,
+            2: existing.playoffLegsToWin
+          }
+        };
+      }
+      // Default new structure
+      return {
+        enabled: false,
+        playersPerGroup: 1,
+        legsToWinByRound: {
+          16: 3,  // Round of 16
+          8: 3,   // Quarter-finals
+          4: 3,   // Semi-finals
+          2: 3    // Final
+        }
+      };
+    })()
   });
   const { addPlayerToTournament, startTournament, updateTournamentSettings } = useTournament();
 
@@ -30,7 +57,7 @@ export function TournamentRegistration({ tournament, onBack }) {
       return;
     }
 
-    if (tournament.players.length >= 64) {
+    if (players.length >= 64) {
       alert(t('registration.tournamentFull'));
       return;
     }
@@ -45,7 +72,7 @@ export function TournamentRegistration({ tournament, onBack }) {
   };
 
   const handleStartTournament = async () => {
-    if (tournament.players.length < 2) {
+    if (players.length < 2) {
       alert(t('registration.needsAtLeast2Players'));
       return;
     }
@@ -98,7 +125,7 @@ export function TournamentRegistration({ tournament, onBack }) {
           <div className="section-header">
             <h2>
               <Users size={20} />
-              {t('registration.players')} ({tournament.players.length})
+              {t('registration.players')} ({players.length})
             </h2>
             <div className="add-player-form">
               <input
@@ -112,7 +139,7 @@ export function TournamentRegistration({ tournament, onBack }) {
               <button 
                 className="add-player-btn"
                 onClick={addPlayer}
-                disabled={!newPlayerName.trim() || tournament.players.length >= 64}
+                disabled={!newPlayerName.trim() || players.length >= 64}
               >
                 <Plus size={16} />
                 {t('registration.addPlayer')}
@@ -121,13 +148,13 @@ export function TournamentRegistration({ tournament, onBack }) {
           </div>
 
           <div className="players-list">
-            {tournament.players.length === 0 ? (
+            {players.length === 0 ? (
               <div className="no-players">
                 <p>{t('registration.noPlayersYet')}</p>
               </div>
             ) : (
               <div className="players-grid">
-                {tournament.players.map((player, index) => (
+                {players.map((player, index) => (
                   <div key={player.id} className="player-card">
                     <span className="player-number">{index + 1}</span>
                     <span className="player-name">{player.name}</span>
@@ -138,7 +165,7 @@ export function TournamentRegistration({ tournament, onBack }) {
           </div>
         </div>
 
-        {tournament.players.length >= 2 && (
+        {players.length >= 2 && (
           <div className="start-tournament-section">
             <button 
               className="start-tournament-btn"
@@ -195,7 +222,7 @@ export function TournamentRegistration({ tournament, onBack }) {
                   <input
                     type="number"
                     min="2"
-                    max={groupSettings.type === 'groups' ? tournament.players.length : Math.ceil(tournament.players.length / 2)}
+                    max={groupSettings.type === 'groups' ? players.length : Math.ceil(players.length / 2)}
                     value={groupSettings.value}
                     onChange={(e) => setGroupSettings({...groupSettings, value: parseInt(e.target.value)})}
                   />
@@ -207,15 +234,15 @@ export function TournamentRegistration({ tournament, onBack }) {
 
               <div className="tournament-preview">
                 <h4>{t('registration.tournamentPreview')}:</h4>
-                <p><strong>{t('registration.players')}:</strong> {tournament.players.length}</p>
+                <p><strong>{t('registration.players')}:</strong> {players.length}</p>
                 <p><strong>{t('registration.groups')}:</strong> {
                   groupSettings.type === 'groups' 
                     ? groupSettings.value 
-                    : Math.ceil(tournament.players.length / groupSettings.value)
+                    : Math.ceil(players.length / groupSettings.value)
                 }</p>
                 <p><strong>{t('registration.playersPerGroup')}:</strong> {
                   groupSettings.type === 'groups'
-                    ? Math.ceil(tournament.players.length / groupSettings.value)
+                    ? Math.ceil(players.length / groupSettings.value)
                     : groupSettings.value
                 }</p>
               </div>
@@ -286,6 +313,89 @@ export function TournamentRegistration({ tournament, onBack }) {
                     <option value={501}>501</option>
                     <option value={701}>701</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="group-settings">
+                <h4>{t('registration.standingsCriteriaOrder')}</h4>
+                <p className="settings-description" style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+                  {t('registration.standingsCriteriaOrderDescription') || 'Nastavte poradie kritérií pre zoradenie v tabuľke skupín. Kritériá sa použijú v tomto poradí pri rovnakých hodnotách.'}
+                </p>
+                <div className="criteria-order-list" style={{ marginBottom: '1.5rem' }}>
+                  {tournamentSettings.standingsCriteriaOrder.map((criterion, index) => {
+                    const criterionLabels = {
+                      matchesWon: t('registration.matchesWon'),
+                      legDifference: t('registration.legDifference'),
+                      average: t('registration.average'),
+                      headToHead: t('registration.headToHead')
+                    };
+                    return (
+                      <div key={criterion} className="criteria-order-item" style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '0.75rem', 
+                        marginBottom: '0.5rem',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                        backgroundColor: '#f9f9f9'
+                      }}>
+                        <span className="criteria-number" style={{ marginRight: '0.75rem', fontWeight: 'bold', minWidth: '2rem' }}>{index + 1}.</span>
+                        <span className="criteria-label" style={{ flex: 1 }}>{criterionLabels[criterion] || criterion}</span>
+                        <div className="criteria-actions" style={{ display: 'flex', gap: '0.25rem' }}>
+                          <button
+                            type="button"
+                            className="move-btn"
+                            onClick={() => {
+                              if (index > 0) {
+                                const newOrder = [...tournamentSettings.standingsCriteriaOrder];
+                                [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
+                                setTournamentSettings({
+                                  ...tournamentSettings,
+                                  standingsCriteriaOrder: newOrder
+                                });
+                              }
+                            }}
+                            disabled={index === 0}
+                            title={t('registration.moveUp')}
+                            style={{ 
+                              padding: '0.25rem 0.5rem',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              backgroundColor: index === 0 ? '#f0f0f0' : '#fff',
+                              cursor: index === 0 ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            <ChevronUp size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="move-btn"
+                            onClick={() => {
+                              if (index < tournamentSettings.standingsCriteriaOrder.length - 1) {
+                                const newOrder = [...tournamentSettings.standingsCriteriaOrder];
+                                [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+                                setTournamentSettings({
+                                  ...tournamentSettings,
+                                  standingsCriteriaOrder: newOrder
+                                });
+                              }
+                            }}
+                            disabled={index === tournamentSettings.standingsCriteriaOrder.length - 1}
+                            title={t('registration.moveDown')}
+                            style={{ 
+                              padding: '0.25rem 0.5rem',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              backgroundColor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? '#f0f0f0' : '#fff',
+                              cursor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            <ChevronDown size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -384,24 +494,96 @@ export function TournamentRegistration({ tournament, onBack }) {
                         <option value={4}>4</option>
                       </select>
                     </div>
-                    <div className="input-group">
-                      <label>{t('registration.playoffLegsToWin')}:</label>
-                      <select 
-                        value={tournamentSettings.playoffSettings.playoffLegsToWin}
-                        onChange={(e) => setTournamentSettings({
-                          ...tournamentSettings,
-                          playoffSettings: {
-                            ...tournamentSettings.playoffSettings,
-                            playoffLegsToWin: parseInt(e.target.value)
-                          }
-                        })}
-                      >
-                        <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
-                        <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
-                        <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
-                        <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
-                        <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
-                      </select>
+                    <div className="playoff-legs-settings">
+                      <h5>{t('registration.playoffLegsToWin')}:</h5>
+                      <div className="input-group">
+                        <label>{t('management.roundOf', { count: 16 })}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[16] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                16: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
+                      <div className="input-group">
+                        <label>{t('management.quarterFinals')}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[8] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                8: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
+                      <div className="input-group">
+                        <label>{t('management.semiFinals')}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[4] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                4: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
+                      <div className="input-group">
+                        <label>{t('management.final')}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[2] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                2: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 )}

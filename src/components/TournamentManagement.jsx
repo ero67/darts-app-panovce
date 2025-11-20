@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings } from 'lucide-react';
+import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings, Edit2, ChevronUp, ChevronDown } from 'lucide-react';
 import { useLiveMatch } from '../contexts/LiveMatchContext';
 import { useAdmin } from '../contexts/AdminContext';
 import { useTournament } from '../contexts/TournamentContext';
@@ -14,6 +14,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState('groups'); // 'groups', 'matches', 'standings', 'playoffs'
   const [showEditSettings, setShowEditSettings] = useState(false);
+  const [editingMatch, setEditingMatch] = useState(null); // Match being edited
   const [tournamentSettings, setTournamentSettings] = useState({
     legsToWin: tournament.legsToWin || 3,
     startingScore: tournament.startingScore || 501,
@@ -21,13 +22,82 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       type: 'groups',
       value: 2
     },
-    playoffSettings: tournament.playoffSettings || {
-      enabled: false,
-      playersPerGroup: 1,
-      playoffLegsToWin: 3
-    }
+    standingsCriteriaOrder: tournament.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+    playoffSettings: (() => {
+      const existing = tournament.playoffSettings;
+      if (existing && existing.legsToWinByRound) {
+        return existing;
+      }
+      // Migrate old structure to new structure
+      if (existing && existing.playoffLegsToWin) {
+        return {
+          ...existing,
+          legsToWinByRound: {
+            16: existing.playoffLegsToWin,
+            8: existing.playoffLegsToWin,
+            4: existing.playoffLegsToWin,
+            2: existing.playoffLegsToWin
+          }
+        };
+      }
+      // Default new structure
+      return {
+        enabled: false,
+        playersPerGroup: 1,
+        legsToWinByRound: {
+          16: 3,  // Round of 16
+          8: 3,   // Quarter-finals
+          4: 3,   // Semi-finals
+          2: 3    // Final
+        }
+      };
+    })()
   });
   const { isMatchLive, isMatchLiveOnThisDevice, isMatchStartedByCurrentUser, getLiveMatchInfo } = useLiveMatch();
+
+  // Update tournamentSettings when tournament prop changes (e.g., after reload from DB)
+  useEffect(() => {
+    if (tournament) {
+      setTournamentSettings({
+        legsToWin: tournament.legsToWin || 3,
+        startingScore: tournament.startingScore || 501,
+        groupSettings: {
+          type: 'groups',
+          value: 2
+        },
+        standingsCriteriaOrder: tournament.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+        playoffSettings: (() => {
+          const existing = tournament.playoffSettings;
+          if (existing && existing.legsToWinByRound) {
+            return existing;
+          }
+          // Migrate old structure to new structure
+          if (existing && existing.playoffLegsToWin) {
+            return {
+              ...existing,
+              legsToWinByRound: {
+                16: existing.playoffLegsToWin,
+                8: existing.playoffLegsToWin,
+                4: existing.playoffLegsToWin,
+                2: existing.playoffLegsToWin
+              }
+            };
+          }
+          // Default new structure
+          return {
+            enabled: false,
+            playersPerGroup: 1,
+            legsToWinByRound: {
+              16: 3,  // Round of 16
+              8: 3,   // Quarter-finals
+              4: 3,   // Semi-finals
+              2: 3    // Final
+            }
+          };
+        })()
+      });
+    }
+  }, [tournament?.id, tournament?.standingsCriteriaOrder, tournament?.playoffSettings]);
 
   // Simple function to check if match exists in localStorage (started on this device)
   const isMatchInLocalStorage = (matchId) => {
@@ -37,7 +107,13 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
   // Enhanced function to check if match should be considered "live" (either in live context or localStorage)
   const isMatchActuallyLive = (matchId) => {
-    // First check if it's in the live matches context
+    // First check the match status - if it's completed, it's not live
+    const match = tournament?.groups?.flatMap(g => g.matches || []).find(m => m.id === matchId);
+    if (match?.status === 'completed') {
+      return false;
+    }
+    
+    // Then check if it's in the live matches context
     if (isMatchLive(matchId)) {
       return true;
     }
@@ -60,13 +136,68 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   const { isAdmin, isAdminMode } = useAdmin();
   const { startPlayoffs: contextStartPlayoffs, updateTournamentSettings } = useTournament();
 
+  // Get legs to win for a specific playoff round based on number of players in that round
+  const getPlayoffLegsToWin = (roundSize) => {
+    if (!tournament?.playoffSettings) {
+      return 3; // Default fallback
+    }
+    
+    // If new structure exists, use it
+    if (tournament.playoffSettings.legsToWinByRound) {
+      return tournament.playoffSettings.legsToWinByRound[roundSize] || 3;
+    }
+    
+    // Fallback to old structure for backward compatibility
+    if (tournament.playoffSettings.playoffLegsToWin) {
+      return tournament.playoffSettings.playoffLegsToWin;
+    }
+    
+    return 3; // Default
+  };
+
+  // Update playoff match players
+  const updatePlayoffMatchPlayers = async (matchId, player1, player2) => {
+    if (!tournament || !tournament.playoffs || !tournament.playoffs.rounds) return;
+    
+    const updatedRounds = tournament.playoffs.rounds.map(round => ({
+      ...round,
+      matches: round.matches.map(match => {
+        if (match.id === matchId) {
+          return {
+            ...match,
+            player1: player1,
+            player2: player2,
+            status: (player1 && player2) ? 'pending' : 'pending'
+          };
+        }
+        return match;
+      })
+    }));
+
+    const updatedPlayoffs = {
+      ...tournament.playoffs,
+      rounds: updatedRounds
+    };
+
+    try {
+      await contextStartPlayoffs(updatedPlayoffs);
+      setEditingMatch(null);
+      alert(t('management.playoffMatchUpdated') || 'Playoff match updated successfully');
+    } catch (error) {
+      console.error('Error updating playoff match:', error);
+      alert(t('management.failedToUpdatePlayoffMatch') || 'Failed to update playoff match');
+    }
+  };
+
   // Generate playoff rounds if they don't exist
+  // Rounds should start at the appropriate level based on number of qualifiers
+  // Top 8 = Quarterfinals, Top 16 = Round of 16, etc.
   const generatePlayoffRounds = useCallback((totalQualifiers) => {
-    const bracketSize = Math.pow(2, Math.ceil(Math.log2(totalQualifiers)));
     const rounds = [];
-    let currentRoundSize = bracketSize;
+    let currentRoundSize = totalQualifiers;
     let roundNumber = 1;
 
+    // Generate rounds from first round to final
     while (currentRoundSize > 1) {
       const round = {
         id: generateId(),
@@ -97,9 +228,9 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     return rounds;
   }, []);
 
-  // Populate playoff bracket with qualifying players
+  // Populate playoff bracket with qualifying players using proper seeding
+  // Seeding: Best vs Worst, 2nd best vs 2nd worst, etc.
   const populatePlayoffBracket = useCallback((qualifyingPlayers, rounds) => {
-    console.log('populatePlayoffBracket called with:', { qualifyingPlayers, rounds });
     
     // If no rounds exist, generate them first
     if (!rounds || rounds.length === 0) {
@@ -108,39 +239,19 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     
     const updatedRounds = [...rounds];
     
-    // Shuffle qualifying players for random bracket placement
-    const shuffledPlayers = [...qualifyingPlayers].sort(() => Math.random() - 0.5);
-    console.log('Shuffled players:', shuffledPlayers);
+    // Don't automatically populate players - let user choose via Edit button
+    // Just ensure all matches have status 'pending' and no players assigned
+    updatedRounds.forEach(round => {
+      round.matches.forEach(match => {
+        // Only reset if match doesn't already have players (preserve existing assignments)
+        if (!match.player1 && !match.player2) {
+          match.player1 = null;
+          match.player2 = null;
+          match.status = 'pending';
+        }
+      });
+    });
     
-    // For 4 players or less, populate the final directly
-    if (qualifyingPlayers.length <= 4) {
-      console.log('Populating final for 4 or fewer players:', qualifyingPlayers.length);
-      const finalRound = updatedRounds[updatedRounds.length - 1]; // Last round (final)
-      if (finalRound && finalRound.matches.length > 0) {
-        const finalMatch = finalRound.matches[0];
-        finalMatch.player1 = shuffledPlayers[0] || null;
-        finalMatch.player2 = shuffledPlayers[1] || null;
-        finalMatch.status = (finalMatch.player1 && finalMatch.player2) ? 'pending' : 'pending';
-        console.log('Final match populated:', {
-          player1: finalMatch.player1?.name,
-          player2: finalMatch.player2?.name,
-          status: finalMatch.status
-        });
-      }
-    } else {
-      // For more than 4 players, populate first round matches
-      const firstRound = updatedRounds[0];
-      if (firstRound) {
-        firstRound.matches.forEach((match, index) => {
-          const player1Index = index * 2;
-          const player2Index = player1Index + 1;
-          
-          match.player1 = shuffledPlayers[player1Index] || null;
-          match.player2 = shuffledPlayers[player2Index] || null;
-          match.status = (match.player1 && match.player2) ? 'pending' : 'pending';
-        });
-      }
-    }
     
     return updatedRounds;
   }, [generatePlayoffRounds]);
@@ -155,28 +266,51 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     );
   };
 
-  // Get qualifying players based on group standings
+  // Get qualifying players based on group standings, sorted by performance for seeding
   const getQualifyingPlayers = () => {
     if (!tournament || !tournament.groups) return [];
     
-    const qualifyingPlayers = [];
+    const allQualifyingPlayers = [];
     const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 2;
     
     tournament.groups.forEach(group => {
       if (group.standings && group.standings.length > 0) {
-        // Sort standings by points (descending), then by leg difference
+        // Sort standings by points (descending), then by leg difference, then by average
         const sortedStandings = [...group.standings].sort((a, b) => {
           if (b.points !== a.points) return b.points - a.points;
-          return (b.legsWon - b.legsLost) - (a.legsWon - a.legsLost);
+          const legDiffA = a.legsWon - a.legsLost;
+          const legDiffB = b.legsWon - b.legsLost;
+          if (legDiffB !== legDiffA) return legDiffB - legDiffA;
+          return (b.average || 0) - (a.average || 0);
         });
         
-        // Take top N players from each group
+        // Take top N players from each group with their position info
         const topPlayers = sortedStandings.slice(0, playersPerGroup);
-        qualifyingPlayers.push(...topPlayers.map(standing => standing.player));
+        topPlayers.forEach((standing, index) => {
+          allQualifyingPlayers.push({
+            player: standing.player,
+            groupPosition: index + 1, // 1st, 2nd, etc. in group
+            points: standing.points,
+            legDifference: standing.legsWon - standing.legsLost,
+            average: standing.average || 0
+          });
+        });
       }
     });
     
-    return qualifyingPlayers;
+    // Sort all qualifying players by performance for seeding:
+    // 1. Points (descending)
+    // 2. Leg difference (descending)
+    // 3. Average (descending)
+    // 4. Group position (1st place in group is better than 2nd place)
+    allQualifyingPlayers.sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points;
+      if (b.legDifference !== a.legDifference) return b.legDifference - a.legDifference;
+      if (b.average !== a.average) return b.average - a.average;
+      return a.groupPosition - b.groupPosition; // Lower position number is better
+    });
+    
+    return allQualifyingPlayers.map(qp => qp.player);
   };
 
   // Start playoffs by populating the bracket with qualifying players
@@ -306,7 +440,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     <div className="groups-view">
       <h3>{t('management.tournamentGroups')}</h3>
       <div className="groups-grid">
-        {tournament.groups.map(group => (
+        {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map(group => (
           <div key={group.id} className="group-card">
             <div className="group-header">
               <h4>{group.name}</h4>
@@ -331,7 +465,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
               </div>
             </div>
           </div>
-        ))}
+        )) : (
+          <div className="no-groups">
+            <p>{t('management.noGroupsYet') || 'No groups created yet. Start the tournament to create groups.'}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -340,7 +478,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     <div className="matches-view">
       <h3>{t('management.allMatches')}</h3>
       <div className="matches-list">
-        {tournament.groups.map(group => (
+        {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map(group => (
           <div key={group.id} className="group-matches">
             <h4>{group.name}</h4>
             <div className="matches-grid">
@@ -432,7 +570,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
               ))}
             </div>
           </div>
-        ))}
+        )) : (
+          <div className="no-matches">
+            <p>{t('management.noGroupsYet') || 'No groups created yet. Start the tournament to create groups.'}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -441,8 +583,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     <div className="standings-view">
       <h3>{t('management.groupStandings')}</h3>
       <div className="standings-list">
-        {tournament.groups.map(group => {
-          console.log('Rendering standings for group:', group.name, 'standings:', group.standings);
+        {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map(group => {
           return (
           <div key={group.id} className="group-standings">
             <h4>{group.name}</h4>
@@ -480,7 +621,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             </div>
           </div>
           );
-        })}
+        }) : (
+          <div className="no-standings">
+            <p>{t('management.noGroupsYet') || 'No groups created yet. Start the tournament to create groups.'}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -518,7 +663,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
               <div className="qualifying-players">
                 <h4>{t('management.qualifyingPlayers')}:</h4>
                 <div className="players-grid">
-                  {tournament.groups.map((group, groupIndex) => {
+                  {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map((group, groupIndex) => {
                     const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 2;
                     const groupQualifiers = qualifyingPlayers.filter(player => 
                       group.players.some(groupPlayer => groupPlayer.id === player.id)
@@ -537,7 +682,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                         </div>
                       </div>
                     );
-                  })}
+                  }) : (
+                    <div className="no-groups">
+                      <p>{t('management.noGroupsYet') || 'No groups created yet.'}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -572,20 +721,10 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     // Check if group stage is complete but playoffs haven't started
     const groupStageComplete = isGroupStageComplete();
     const hasQualifyingPlayers = tournament.playoffs?.qualifyingPlayers && tournament.playoffs.qualifyingPlayers.length > 0;
-    const playersAssignedToMatches = tournament.playoffs?.rounds?.some(round => 
-      round.matches.some(match => match.player1 && match.player2)
-    );
-    const playoffsStarted = hasQualifyingPlayers && playersAssignedToMatches;
+    const hasPlayoffRounds = tournament.playoffs?.rounds && tournament.playoffs.rounds.length > 0;
+    // Playoffs are started if we have qualifying players and rounds (players don't need to be assigned yet)
+    const playoffsStarted = hasQualifyingPlayers && hasPlayoffRounds;
     
-    console.log('Playoff debug:', {
-      groupStageComplete,
-      hasQualifyingPlayers,
-      playersAssignedToMatches,
-      playoffsStarted,
-      playoffSettings: tournament.playoffSettings,
-      playoffs: tournament.playoffs,
-      qualifyingPlayers: tournament.playoffs?.qualifyingPlayers
-    });
 
     if (groupStageComplete && !playoffsStarted) {
       const qualifyingPlayers = getQualifyingPlayers();
@@ -603,7 +742,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             <div className="qualifying-players">
               <h4>Qualifying Players:</h4>
               <div className="players-grid">
-                {tournament.groups.map((group, groupIndex) => {
+                {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map((group, groupIndex) => {
                   const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 2;
                   const groupQualifiers = qualifyingPlayers.filter(player => 
                     group.players.some(groupPlayer => groupPlayer.id === player.id)
@@ -622,7 +761,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                       </div>
                     </div>
                   );
-                })}
+                }) : (
+                  <div className="no-groups">
+                    <p>{t('management.noGroupsYet') || 'No groups created yet.'}</p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -646,12 +789,6 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     const { rounds, currentRound, qualifyingPlayers } = tournament.playoffs;
     const playoffMatches = tournament.playoffMatches || [];
 
-    console.log('Rendering playoff bracket:', {
-      rounds: rounds,
-      currentRound: currentRound,
-      qualifyingPlayers: qualifyingPlayers,
-      playoffMatches: playoffMatches
-    });
 
     // Check if players need to be assigned to matches
     const needsPlayerAssignment = rounds.some(round => 
@@ -680,12 +817,6 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                 {round.matches.map((bracketMatch) => {
                   // Find the actual database match for this bracket match
                   const match = playoffMatches.find(pm => pm.id === bracketMatch.id) || bracketMatch;
-                  console.log('Rendering playoff match:', {
-                    matchId: match.id,
-                    player1: match.player1,
-                    player2: match.player2,
-                    status: match.status
-                  });
                   return (
                   <div key={match.id} className={`playoff-match ${match.status}`}>
                     <div className="match-players">
@@ -709,15 +840,30 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                     </div>
                     
                     <div className="match-actions">
+                      {isAdmin && match.status === 'pending' && (
+                        <button 
+                          className="edit-match-btn"
+                          onClick={() => setEditingMatch(match)}
+                          title={t('management.editMatchPlayers') || 'Edit match players'}
+                        >
+                          <Edit2 size={16} />
+                          {t('common.edit')}
+                        </button>
+                      )}
                       {match.status === 'pending' && match.player1 && match.player2 && (
                         <button 
                           className="start-match-btn"
-                          onClick={() => onMatchStart({ 
-                            ...match,
-                            legsToWin: tournament.playoffSettings.playoffLegsToWin,
-                            startingScore: tournament.startingScore,
-                            isPlayoff: true
-                          })}
+                          onClick={() => {
+                            // Calculate round size from number of matches (each match has 2 players)
+                            const roundSize = round.matches.length * 2;
+                            const legsToWin = getPlayoffLegsToWin(roundSize);
+                            onMatchStart({ 
+                              ...match,
+                              legsToWin: legsToWin,
+                              startingScore: tournament.startingScore,
+                              isPlayoff: true
+                            });
+                          }}
                         >
                           <Play size={16} />
                           Start Match
@@ -870,6 +1016,89 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
               </div>
 
               <div className="group-settings">
+                <h4>{t('registration.standingsCriteriaOrder')}</h4>
+                <p className="settings-description" style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+                  {t('registration.standingsCriteriaOrderDescription') || 'Nastavte poradie kritérií pre zoradenie v tabuľke skupín. Kritériá sa použijú v tomto poradí pri rovnakých hodnotách.'}
+                </p>
+                <div className="criteria-order-list" style={{ marginBottom: '1.5rem' }}>
+                  {tournamentSettings.standingsCriteriaOrder.map((criterion, index) => {
+                    const criterionLabels = {
+                      matchesWon: t('registration.matchesWon'),
+                      legDifference: t('registration.legDifference'),
+                      average: t('registration.average'),
+                      headToHead: t('registration.headToHead')
+                    };
+                    return (
+                      <div key={criterion} className="criteria-order-item" style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '0.75rem', 
+                        marginBottom: '0.5rem',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                        backgroundColor: '#f9f9f9'
+                      }}>
+                        <span className="criteria-number" style={{ marginRight: '0.75rem', fontWeight: 'bold', minWidth: '2rem' }}>{index + 1}.</span>
+                        <span className="criteria-label" style={{ flex: 1 }}>{criterionLabels[criterion] || criterion}</span>
+                        <div className="criteria-actions" style={{ display: 'flex', gap: '0.25rem' }}>
+                          <button
+                            type="button"
+                            className="move-btn"
+                            onClick={() => {
+                              if (index > 0) {
+                                const newOrder = [...tournamentSettings.standingsCriteriaOrder];
+                                [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
+                                setTournamentSettings({
+                                  ...tournamentSettings,
+                                  standingsCriteriaOrder: newOrder
+                                });
+                              }
+                            }}
+                            disabled={index === 0}
+                            title={t('registration.moveUp')}
+                            style={{ 
+                              padding: '0.25rem 0.5rem',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              backgroundColor: index === 0 ? '#f0f0f0' : '#fff',
+                              cursor: index === 0 ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            <ChevronUp size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="move-btn"
+                            onClick={() => {
+                              if (index < tournamentSettings.standingsCriteriaOrder.length - 1) {
+                                const newOrder = [...tournamentSettings.standingsCriteriaOrder];
+                                [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+                                setTournamentSettings({
+                                  ...tournamentSettings,
+                                  standingsCriteriaOrder: newOrder
+                                });
+                              }
+                            }}
+                            disabled={index === tournamentSettings.standingsCriteriaOrder.length - 1}
+                            title={t('registration.moveDown')}
+                            style={{ 
+                              padding: '0.25rem 0.5rem',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              backgroundColor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? '#f0f0f0' : '#fff',
+                              cursor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            <ChevronDown size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="group-settings">
                 <h4>Group Settings</h4>
                 <div className="radio-group">
                   <label>
@@ -964,24 +1193,96 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                         <option value={4}>4</option>
                       </select>
                     </div>
-                    <div className="input-group">
-                      <label>Playoff legs to win:</label>
-                      <select 
-                        value={tournamentSettings.playoffSettings.playoffLegsToWin}
-                        onChange={(e) => setTournamentSettings({
-                          ...tournamentSettings,
-                          playoffSettings: {
-                            ...tournamentSettings.playoffSettings,
-                            playoffLegsToWin: parseInt(e.target.value)
-                          }
-                        })}
-                      >
-                        <option value={1}>First to 1</option>
-                        <option value={2}>First to 2</option>
-                        <option value={3}>First to 3</option>
-                        <option value={5}>First to 5</option>
-                        <option value={7}>First to 7</option>
-                      </select>
+                    <div className="playoff-legs-settings">
+                      <h5>{t('registration.playoffLegsToWin')}:</h5>
+                      <div className="input-group">
+                        <label>{t('management.roundOf', { count: 16 })}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[16] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                16: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
+                      <div className="input-group">
+                        <label>{t('management.quarterFinals')}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[8] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                8: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
+                      <div className="input-group">
+                        <label>{t('management.semiFinals')}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[4] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                4: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
+                      <div className="input-group">
+                        <label>{t('management.final')}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[2] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                2: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1004,6 +1305,136 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           </div>
         </div>
       )}
+
+      {/* Edit Playoff Match Modal */}
+      {editingMatch && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>{t('management.editMatchPlayers') || 'Edit Match Players'}</h3>
+              <button 
+                className="close-btn"
+                onClick={() => setEditingMatch(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-content">
+              <EditPlayoffMatchForm
+                match={editingMatch}
+                qualifyingPlayers={tournament.playoffs?.qualifyingPlayers || []}
+                allRounds={tournament.playoffs?.rounds || []}
+                onSave={(player1, player2) => updatePlayoffMatchPlayers(editingMatch.id, player1, player2)}
+                onCancel={() => setEditingMatch(null)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Component for editing playoff match players
+function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onCancel }) {
+  const [selectedPlayer1, setSelectedPlayer1] = useState(match.player1);
+  const [selectedPlayer2, setSelectedPlayer2] = useState(match.player2);
+
+  // Find which round this match belongs to
+  const currentRound = allRounds.find(round => 
+    round.matches.some(m => m.id === match.id)
+  );
+
+  // Get all players already assigned in other matches in the same round
+  const getAssignedPlayers = () => {
+    if (!currentRound) return [];
+    
+    const assignedPlayerIds = new Set();
+    currentRound.matches.forEach(m => {
+      // Don't include players from the current match being edited
+      if (m.id !== match.id) {
+        if (m.player1?.id) assignedPlayerIds.add(m.player1.id);
+        if (m.player2?.id) assignedPlayerIds.add(m.player2.id);
+      }
+    });
+    
+    return Array.from(assignedPlayerIds);
+  };
+
+  const assignedPlayerIds = getAssignedPlayers();
+
+  // Filter out already assigned players, but keep currently selected players
+  const getAvailablePlayers = (excludePlayerId = null) => {
+    return qualifyingPlayers.filter(player => {
+      // Always include currently selected players (for player1 and player2 dropdowns)
+      if (player.id === selectedPlayer1?.id || player.id === selectedPlayer2?.id) {
+        return true;
+      }
+      // Exclude the other selected player in the same dropdown
+      if (excludePlayerId && player.id === excludePlayerId) {
+        return false;
+      }
+      // Exclude already assigned players in other matches
+      return !assignedPlayerIds.includes(player.id);
+    });
+  };
+
+  const handleSave = () => {
+    if (!selectedPlayer1 || !selectedPlayer2) {
+      alert('Please select both players');
+      return;
+    }
+    if (selectedPlayer1.id === selectedPlayer2.id) {
+      alert('Players must be different');
+      return;
+    }
+    onSave(selectedPlayer1, selectedPlayer2);
+  };
+
+  return (
+    <div className="edit-playoff-match-form">
+      <div className="input-group">
+        <label>Player 1:</label>
+        <select
+          value={selectedPlayer1?.id || ''}
+          onChange={(e) => {
+            const player = qualifyingPlayers.find(p => p.id === e.target.value);
+            setSelectedPlayer1(player || null);
+          }}
+        >
+          <option value="">Select Player 1</option>
+          {getAvailablePlayers(selectedPlayer2?.id).map(player => (
+            <option key={player.id} value={player.id}>
+              {player.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="input-group">
+        <label>Player 2:</label>
+        <select
+          value={selectedPlayer2?.id || ''}
+          onChange={(e) => {
+            const player = qualifyingPlayers.find(p => p.id === e.target.value);
+            setSelectedPlayer2(player || null);
+          }}
+        >
+          <option value="">Select Player 2</option>
+          {getAvailablePlayers(selectedPlayer1?.id).map(player => (
+            <option key={player.id} value={player.id}>
+              {player.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="modal-actions">
+        <button className="cancel-btn" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="confirm-btn" onClick={handleSave}>
+          Save Changes
+        </button>
+      </div>
     </div>
   );
 }

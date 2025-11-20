@@ -145,6 +145,14 @@
     "enablePlayoffs": "Povoliť Play-off",
     "playersAdvancingPerGroup": "Hráčov postupujúcich zo skupiny",
     "playoffLegsToWin": "Legov na výhru v play-off",
+    "standingsCriteriaOrder": "Poradie Kritérií v Tabuľke",
+    "standingsCriteriaOrderDescription": "Nastavte poradie kritérií pre zoradenie v tabuľke skupín. Kritériá sa použijú v tomto poradí pri rovnakých hodnotách.",
+    "matchesWon": "Počet Víťazstiev",
+    "legDifference": "Rozdiel Legov",
+    "average": "Priemer",
+    "headToHead": "Vzájomný Zápas",
+    "moveUp": "Nahor",
+    "moveDown": "Dolů",
     "updateSettings": "Aktualizovať Nastavenia"
   },
   "management": {
@@ -195,7 +203,10 @@
     "startPlayoffs": "Spustiť Play-off",
     "playoffsNote": "Hráči budú náhodne nasadení do pavúka",
     "playoffsNotAvailable": "Play-off Nie Je Dostupné",
-    "playoffsAvailableAfterGroups": "Play-off bude dostupné po dokončení skupinovej fázy."
+    "playoffsAvailableAfterGroups": "Play-off bude dostupné po dokončení skupinovej fázy.",
+    "editMatchPlayers": "Upraviť Hráčov Zápasu",
+    "playoffMatchUpdated": "Playoff zápas bol úspešne aktualizovaný",
+    "failedToUpdatePlayoffMatch": "Nepodarilo sa aktualizovať playoff zápas"
   },
   "auth": {
     "appTitle": "Správca Šípkových Turnajov",

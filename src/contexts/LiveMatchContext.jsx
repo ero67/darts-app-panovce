@@ -110,13 +110,28 @@ export function LiveMatchProvider({ children }) {
         const liveMatchesData = JSON.parse(savedLiveMatches);
         const liveMatchesMap = new Map(liveMatchesData);
         
-        // Clean up old matches (older than 1 hour)
+        // Clean up old matches (older than 1 hour) and completed matches
         const oneHourAgo = Date.now() - (60 * 60 * 1000);
         const cleanedMatches = new Map();
         
         for (const [matchId, matchData] of liveMatchesMap) {
+          // Skip if match is marked as completed in matchData
+          if (matchData.matchData?.matchComplete || matchData.matchData?.status === 'completed') {
+            continue;
+          }
+          
+          // Skip if match is older than 1 hour
           if (matchData.lastUpdate > oneHourAgo) {
             cleanedMatches.set(matchId, matchData);
+          }
+        }
+        
+        // Update localStorage with cleaned matches
+        if (cleanedMatches.size !== liveMatchesMap.size) {
+          if (cleanedMatches.size > 0) {
+            localStorage.setItem('darts-live-matches', JSON.stringify(Array.from(cleanedMatches)));
+          } else {
+            localStorage.removeItem('darts-live-matches');
           }
         }
         
@@ -131,6 +146,9 @@ export function LiveMatchProvider({ children }) {
   useEffect(() => {
     if (state.liveMatches.size > 0) {
       localStorage.setItem('darts-live-matches', JSON.stringify(Array.from(state.liveMatches)));
+    } else {
+      // Clear localStorage if no live matches
+      localStorage.removeItem('darts-live-matches');
     }
   }, [state.liveMatches]);
 
@@ -171,6 +189,22 @@ export function LiveMatchProvider({ children }) {
 
   const endLiveMatch = (matchId) => {
     dispatch({ type: ACTIONS.END_LIVE_MATCH, payload: { matchId } });
+    // Also remove from localStorage immediately
+    const savedLiveMatches = localStorage.getItem('darts-live-matches');
+    if (savedLiveMatches) {
+      try {
+        const liveMatchesData = JSON.parse(savedLiveMatches);
+        const liveMatchesMap = new Map(liveMatchesData);
+        liveMatchesMap.delete(matchId);
+        if (liveMatchesMap.size > 0) {
+          localStorage.setItem('darts-live-matches', JSON.stringify(Array.from(liveMatchesMap)));
+        } else {
+          localStorage.removeItem('darts-live-matches');
+        }
+      } catch (error) {
+        console.error('Error removing live match from localStorage:', error);
+      }
+    }
   };
 
   const updateLiveMatch = (matchId, matchData) => {
