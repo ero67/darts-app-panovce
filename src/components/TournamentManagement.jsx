@@ -272,6 +272,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     
     const allQualifyingPlayers = [];
     const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 2;
+    const allPlayersValue = 9999; // Special value to represent "all players"
     
     tournament.groups.forEach(group => {
       if (group.standings && group.standings.length > 0) {
@@ -285,7 +286,10 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
         });
         
         // Take top N players from each group with their position info
-        const topPlayers = sortedStandings.slice(0, playersPerGroup);
+        // If playersPerGroup is 9999 (all players), take all players
+        const topPlayers = playersPerGroup === allPlayersValue 
+          ? sortedStandings 
+          : sortedStandings.slice(0, playersPerGroup);
         topPlayers.forEach((standing, index) => {
           allQualifyingPlayers.push({
             player: standing.player,
@@ -665,15 +669,19 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                 <div className="players-grid">
                   {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map((group, groupIndex) => {
                     const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 2;
+                    const allPlayersValue = 9999; // Special value to represent "all players"
                     const groupQualifiers = qualifyingPlayers.filter(player => 
                       group.players.some(groupPlayer => groupPlayer.id === player.id)
                     );
+                    const displayedQualifiers = playersPerGroup === allPlayersValue 
+                      ? groupQualifiers 
+                      : groupQualifiers.slice(0, playersPerGroup);
                     
                     return (
                       <div key={group.id} className="group-qualifiers">
                         <h5>{group.name}</h5>
                         <div className="qualifiers-list">
-                          {groupQualifiers.slice(0, playersPerGroup).map((player, index) => (
+                          {displayedQualifiers.map((player, index) => (
                             <div key={player.id} className="qualifier">
                               <span className="position">{index + 1}</span>
                               <span className="player-name">{player.name}</span>
@@ -744,15 +752,19 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
               <div className="players-grid">
                 {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map((group, groupIndex) => {
                   const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 2;
+                  const allPlayersValue = 9999; // Special value to represent "all players"
                   const groupQualifiers = qualifyingPlayers.filter(player => 
                     group.players.some(groupPlayer => groupPlayer.id === player.id)
                   );
+                  const displayedQualifiers = playersPerGroup === allPlayersValue 
+                    ? groupQualifiers 
+                    : groupQualifiers.slice(0, playersPerGroup);
                   
                   return (
                     <div key={group.id} className="group-qualifiers">
                       <h5>{group.name}</h5>
                       <div className="qualifiers-list">
-                        {groupQualifiers.slice(0, playersPerGroup).map((player, index) => (
+                        {displayedQualifiers.map((player, index) => (
                           <div key={player.id} className="qualifier">
                             <span className="position">{index + 1}</span>
                             <span className="player-name">{player.name}</span>
@@ -1140,14 +1152,14 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                   </label>
                   <input
                     type="number"
-                    min="2"
+                    min="1"
                     max={tournamentSettings.groupSettings.type === 'groups' ? '16' : '8'}
                     value={tournamentSettings.groupSettings.value}
                     onChange={(e) => setTournamentSettings({
                       ...tournamentSettings,
                       groupSettings: {
                         ...tournamentSettings.groupSettings,
-                        value: parseInt(e.target.value) || 2
+                        value: parseInt(e.target.value) || 1
                       }
                     })}
                   />
@@ -1173,26 +1185,45 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                   </label>
                 </div>
                 
-                {tournamentSettings.playoffSettings.enabled && (
-                  <div className="playoff-options">
-                    <div className="input-group">
-                      <label>Players advancing per group:</label>
-                      <select 
-                        value={tournamentSettings.playoffSettings.playersPerGroup}
-                        onChange={(e) => setTournamentSettings({
-                          ...tournamentSettings,
-                          playoffSettings: {
-                            ...tournamentSettings.playoffSettings,
-                            playersPerGroup: parseInt(e.target.value)
-                          }
-                        })}
-                      >
-                        <option value={1}>1</option>
-                        <option value={2}>2</option>
-                        <option value={3}>3</option>
-                        <option value={4}>4</option>
-                      </select>
-                    </div>
+                {tournamentSettings.playoffSettings.enabled && (() => {
+                  // Calculate max players per group from actual tournament groups
+                  const calculateMaxPlayersPerGroup = () => {
+                    if (tournament?.groups && tournament.groups.length > 0) {
+                      return Math.max(...tournament.groups.map(group => 
+                        group.players?.length || group.standings?.length || 0
+                      ));
+                    }
+                    // Fallback: calculate from group settings if groups not yet created
+                    if (tournamentSettings.groupSettings.type === 'groups') {
+                      const totalPlayers = tournament?.players?.length || 0;
+                      return totalPlayers > 0 ? Math.ceil(totalPlayers / tournamentSettings.groupSettings.value) : 4;
+                    } else {
+                      return tournamentSettings.groupSettings.value || 4;
+                    }
+                  };
+                  const maxPlayersPerGroup = calculateMaxPlayersPerGroup();
+                  const allPlayersValue = 9999; // Special value to represent "all players"
+                  
+                  return (
+                    <div className="playoff-options">
+                      <div className="input-group">
+                        <label>Players advancing per group:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.playersPerGroup}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              playersPerGroup: parseInt(e.target.value)
+                            }
+                          })}
+                        >
+                          {Array.from({ length: maxPlayersPerGroup }, (_, i) => i + 1).map(num => (
+                            <option key={num} value={num}>{num}</option>
+                          ))}
+                          <option value={allPlayersValue}>All</option>
+                        </select>
+                      </div>
                     <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
                       <div className="input-group">
@@ -1285,7 +1316,8 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                       </div>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
             <div className="modal-actions">

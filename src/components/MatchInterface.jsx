@@ -488,7 +488,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
 
     // Check for bust immediately
     if (newCurrentScore < 0 || newCurrentScore === 1) {
-      // Bust - show visual feedback, restore score, and switch player
+      // Bust - show visual feedback, restore score by adding back ALL darts in this turn, and switch player
       setTimeout(() => {
         setCurrentTurn(prev => ({
           ...prev,
@@ -496,12 +496,12 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
           darts: 0,
           scores: []
         }));
-        // Restore the original score
+        // Restore the score by adding back the sum of ALL darts thrown in this turn
         setLegScores(prev => ({
           ...prev,
           [`player${currentPlayer + 1}`]: {
             ...prev[`player${currentPlayer + 1}`],
-            currentScore: currentPlayerData.currentScore
+            currentScore: prev[`player${currentPlayer + 1}`].currentScore + newScore
           }
         }));
         // Switch to next player after bust

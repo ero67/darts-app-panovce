@@ -221,7 +221,7 @@ export function TournamentRegistration({ tournament, onBack }) {
                 <div className="input-group">
                   <input
                     type="number"
-                    min="2"
+                    min="1"
                     max={groupSettings.type === 'groups' ? players.length : Math.ceil(players.length / 2)}
                     value={groupSettings.value}
                     onChange={(e) => setGroupSettings({...groupSettings, value: parseInt(e.target.value)})}
@@ -441,14 +441,14 @@ export function TournamentRegistration({ tournament, onBack }) {
                   </label>
                   <input
                     type="number"
-                    min="2"
+                    min="1"
                     max={tournamentSettings.groupSettings.type === 'groups' ? '16' : '8'}
                     value={tournamentSettings.groupSettings.value}
                     onChange={(e) => setTournamentSettings({
                       ...tournamentSettings,
                       groupSettings: {
                         ...tournamentSettings.groupSettings,
-                        value: parseInt(e.target.value) || 2
+                        value: parseInt(e.target.value) || 1
                       }
                     })}
                   />
@@ -474,27 +474,39 @@ export function TournamentRegistration({ tournament, onBack }) {
                   </label>
                 </div>
                 
-                {tournamentSettings.playoffSettings.enabled && (
-                  <div className="playoff-options">
-                    <div className="input-group">
-                      <label>{t('registration.playersAdvancingPerGroup')}:</label>
-                      <select 
-                        value={tournamentSettings.playoffSettings.playersPerGroup}
-                        onChange={(e) => setTournamentSettings({
-                          ...tournamentSettings,
-                          playoffSettings: {
-                            ...tournamentSettings.playoffSettings,
-                            playersPerGroup: parseInt(e.target.value)
-                          }
-                        })}
-                      >
-                        <option value={1}>1</option>
-                        <option value={2}>2</option>
-                        <option value={3}>3</option>
-                        <option value={4}>4</option>
-                      </select>
-                    </div>
-                    <div className="playoff-legs-settings">
+                {tournamentSettings.playoffSettings.enabled && (() => {
+                  // Calculate max players per group based on group settings
+                  const calculateMaxPlayersPerGroup = () => {
+                    if (tournamentSettings.groupSettings.type === 'groups') {
+                      return Math.ceil(players.length / tournamentSettings.groupSettings.value);
+                    } else {
+                      return tournamentSettings.groupSettings.value;
+                    }
+                  };
+                  const maxPlayersPerGroup = calculateMaxPlayersPerGroup();
+                  const allPlayersValue = 9999; // Special value to represent "all players"
+                  
+                  return (
+                    <div className="playoff-options">
+                      <div className="input-group">
+                        <label>{t('registration.playersAdvancingPerGroup')}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.playersPerGroup}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              playersPerGroup: parseInt(e.target.value)
+                            }
+                          })}
+                        >
+                          {Array.from({ length: maxPlayersPerGroup }, (_, i) => i + 1).map(num => (
+                            <option key={num} value={num}>{num}</option>
+                          ))}
+                          <option value={allPlayersValue}>All</option>
+                        </select>
+                      </div>
+                      <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
                       <div className="input-group">
                         <label>{t('management.roundOf', { count: 16 })}:</label>
@@ -586,7 +598,8 @@ export function TournamentRegistration({ tournament, onBack }) {
                       </div>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
             <div className="modal-actions">

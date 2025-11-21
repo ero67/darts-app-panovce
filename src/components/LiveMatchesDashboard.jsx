@@ -19,8 +19,8 @@ const LiveMatchesDashboard = () => {
     loadLiveMatches();
 
     // Set up real-time subscription
-    const subscription = supabase
-      .channel('live-matches')
+    const channel = supabase
+      .channel('live-matches-updates')
       .on('postgres_changes', 
         { 
           event: 'UPDATE', 
@@ -28,17 +28,49 @@ const LiveMatchesDashboard = () => {
           table: 'matches',
           filter: 'status=eq.in_progress'
         },
-        (payload) => {
+        async (payload) => {
+          console.log('📡 Live match update received:', payload.new.id);
+          
           if (payload.new.status === 'in_progress') {
-            setLiveMatches(prev => {
-              const existing = prev.find(m => m.id === payload.new.id);
-              if (existing) {
-                return prev.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m);
-              } else {
-                return [...prev, payload.new];
-              }
-            });
+            // Reload the full match data with relations to get updated scores
+            const { data: updatedMatch, error } = await supabase
+              .from('matches')
+              .select(`
+                *,
+                player1:players!matches_player1_id_fkey(*),
+                player2:players!matches_player2_id_fkey(*),
+                group:groups(
+                  *,
+                  tournament:tournaments(*)
+                )
+              `)
+              .eq('id', payload.new.id)
+              .single();
+
+            if (!error && updatedMatch) {
+              setLiveMatches(prev => {
+                const existing = prev.find(m => m.id === updatedMatch.id);
+                if (existing) {
+                  // Update existing match with fresh data
+                  return prev.map(m => m.id === updatedMatch.id ? updatedMatch : m);
+                } else {
+                  // Add new match if it doesn't exist
+                  return [...prev, updatedMatch];
+                }
+              });
+            } else {
+              // Fallback: update with payload data if full reload fails
+              setLiveMatches(prev => {
+                const existing = prev.find(m => m.id === payload.new.id);
+                if (existing) {
+                  return prev.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m);
+                } else {
+                  return [...prev, payload.new];
+                }
+              });
+            }
           } else if (payload.new.status === 'completed') {
+            // Remove completed match
             setLiveMatches(prev => prev.filter(m => m.id !== payload.new.id));
           }
         }
@@ -50,14 +82,50 @@ const LiveMatchesDashboard = () => {
           table: 'matches',
           filter: 'status=eq.in_progress'
         },
-        (payload) => {
-          setLiveMatches(prev => [...prev, payload.new]);
+        async (payload) => {
+          console.log('📡 New live match inserted:', payload.new.id);
+          
+          // Load full match data with relations
+          const { data: newMatch, error } = await supabase
+            .from('matches')
+            .select(`
+              *,
+              player1:players!matches_player1_id_fkey(*),
+              player2:players!matches_player2_id_fkey(*),
+              group:groups(
+                *,
+                tournament:tournaments(*)
+              )
+            `)
+            .eq('id', payload.new.id)
+            .single();
+
+          if (!error && newMatch) {
+            setLiveMatches(prev => {
+              // Check if match already exists
+              if (prev.find(m => m.id === newMatch.id)) {
+                return prev;
+              }
+              return [...prev, newMatch];
+            });
+          } else {
+            // Fallback: add payload data if full reload fails
+            setLiveMatches(prev => {
+              if (prev.find(m => m.id === payload.new.id)) {
+                return prev;
+              }
+              return [...prev, payload.new];
+            });
+          }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('📡 Subscription status:', status);
+      });
 
     return () => {
-      subscription.unsubscribe();
+      console.log('📡 Unsubscribing from live matches');
+      supabase.removeChannel(channel);
     };
   }, []);
 
