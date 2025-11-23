@@ -4,6 +4,7 @@ import { useLiveMatch } from '../contexts/LiveMatchContext';
 import { useAdmin } from '../contexts/AdminContext';
 import { useTournament } from '../contexts/TournamentContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 
   // Generate unique ID for playoff matches (using crypto.randomUUID for proper UUIDs)
   const generateId = () => {
@@ -12,6 +13,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 export function TournamentManagement({ tournament, onMatchStart, onBack, onDeleteTournament }) {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('groups'); // 'groups', 'matches', 'standings', 'playoffs'
   const [showEditSettings, setShowEditSettings] = useState(false);
   const [editingMatch, setEditingMatch] = useState(null); // Match being edited
@@ -511,45 +513,66 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                     )}
                   </div>
                   {match.status === 'pending' && !isMatchActuallyLive(match.id) && (
-                    <button 
-                      className="start-match-btn"
-                      onClick={() => onMatchStart({ 
-                        ...match,
-                        groupId: group.id,
-                        legsToWin: match.legsToWin || tournament.legsToWin,
-                        startingScore: match.startingScore || tournament.startingScore
-                      })}
-                    >
-                      <Play size={16} />
-                      {t('management.startMatch')}
-                    </button>
+                    user ? (
+                      <button 
+                        className="start-match-btn"
+                        onClick={() => onMatchStart({ 
+                          ...match,
+                          groupId: group.id,
+                          legsToWin: match.legsToWin || tournament.legsToWin,
+                          startingScore: match.startingScore || tournament.startingScore
+                        })}
+                      >
+                        <Play size={16} />
+                        {t('management.startMatch')}
+                      </button>
+                    ) : (
+                      <div className="login-required-message">
+                        <Eye size={16} />
+                        {t('management.loginToStartMatch') || 'Login required to start match'}
+                      </div>
+                    )
                   )}
                   {isMatchActuallyLive(match.id) && !isMatchInLocalStorage(match.id) && (
                     <button 
-                      className={`view-match-btn ${isAdmin ? 'continue-match-btn' : ''}`}
+                      className={`view-match-btn ${isAdmin && user ? 'continue-match-btn' : ''}`}
                       onClick={() => onMatchStart({ 
                         ...match,
                         legsToWin: match.legsToWin || tournament.legsToWin,
                         startingScore: match.startingScore || tournament.startingScore
                       })}
-                      disabled={!isAdmin}
+                      disabled={!isAdmin || !user}
                     >
                       <Eye size={16} />
-                      {isAdmin ? t('management.continueMatch') : t('management.viewLiveMatch')}
+                      {isAdmin && user ? t('management.continueMatch') : t('management.viewLiveMatch')}
                     </button>
                   )}
                   {isMatchActuallyLive(match.id) && isMatchInLocalStorage(match.id) && (
-                    <button 
-                      className="continue-match-btn"
-                      onClick={() => onMatchStart({ 
-                        ...match,
-                        legsToWin: match.legsToWin || tournament.legsToWin,
-                        startingScore: match.startingScore || tournament.startingScore
-                      })}
-                    >
-                      <Play size={16} />
-                      {t('management.continueMatch')}
-                    </button>
+                    user ? (
+                      <button 
+                        className="continue-match-btn"
+                        onClick={() => onMatchStart({ 
+                          ...match,
+                          legsToWin: match.legsToWin || tournament.legsToWin,
+                          startingScore: match.startingScore || tournament.startingScore
+                        })}
+                      >
+                        <Play size={16} />
+                        {t('management.continueMatch')}
+                      </button>
+                    ) : (
+                      <button 
+                        className="view-match-btn"
+                        onClick={() => onMatchStart({ 
+                          ...match,
+                          legsToWin: match.legsToWin || tournament.legsToWin,
+                          startingScore: match.startingScore || tournament.startingScore
+                        })}
+                      >
+                        <Eye size={16} />
+                        {t('management.viewLiveMatch')}
+                      </button>
+                    )
                   )}
                   {match.status === 'completed' && match.result && (
                     <div className="match-result">
@@ -863,23 +886,30 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                         </button>
                       )}
                       {match.status === 'pending' && match.player1 && match.player2 && (
-                        <button 
-                          className="start-match-btn"
-                          onClick={() => {
-                            // Calculate round size from number of matches (each match has 2 players)
-                            const roundSize = round.matches.length * 2;
-                            const legsToWin = getPlayoffLegsToWin(roundSize);
-                            onMatchStart({ 
-                              ...match,
-                              legsToWin: legsToWin,
-                              startingScore: tournament.startingScore,
-                              isPlayoff: true
-                            });
-                          }}
-                        >
-                          <Play size={16} />
-                          Start Match
-                        </button>
+                        user ? (
+                          <button 
+                            className="start-match-btn"
+                            onClick={() => {
+                              // Calculate round size from number of matches (each match has 2 players)
+                              const roundSize = round.matches.length * 2;
+                              const legsToWin = getPlayoffLegsToWin(roundSize);
+                              onMatchStart({ 
+                                ...match,
+                                legsToWin: legsToWin,
+                                startingScore: tournament.startingScore,
+                                isPlayoff: true
+                              });
+                            }}
+                          >
+                            <Play size={16} />
+                            Start Match
+                          </button>
+                        ) : (
+                          <div className="login-required-message">
+                            <Eye size={16} />
+                            {t('management.loginToStartMatch') || 'Login required to start match'}
+                          </div>
+                        )
                       )}
                       {match.status === 'completed' && (
                         <div className="match-completed">

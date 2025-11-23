@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Target, RotateCcw, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Target, RotateCcw, CheckCircle, Eye } from 'lucide-react';
 import { useLiveMatch } from '../contexts/LiveMatchContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -118,6 +118,9 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   
   const { startLiveMatch, endLiveMatch, updateLiveMatch, isMatchLiveOnThisDevice } = useLiveMatch();
   const { user } = useAuth();
+  
+  // Check if user is logged in - non-logged-in users can only view
+  const isViewOnly = !user;
 
   // Function to load match state from database
   const loadMatchStateFromDatabase = async (matchId, startingScore) => {
@@ -351,13 +354,19 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     ? legScores[`player${currentPlayer + 1}`] 
     : null;
 
-  const dartNumbers = [25, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]; // 25 for bullseye, 0 for miss
+  const dartNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 0]; // Ascending order: 1-20, 25 (bull), 0 (miss)
 
-  // Start live match when component mounts (only if match is not completed)
+  // Start live match when component mounts (only if match is not completed and user is logged in)
   useEffect(() => {
     // Don't start live match if match is already completed
     if (match?.status === 'completed' || matchComplete) {
       console.log('Match is already completed, skipping live match start');
+      return;
+    }
+    
+    // Only start live match tracking if user is logged in
+    if (!user) {
+      console.log('User not logged in, skipping live match start');
       return;
     }
     
@@ -390,12 +399,12 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     return () => {
       endLiveMatch(match.id);
     };
-  }, []);
+  }, [user]);
 
-  // Update live match data whenever match state changes (only if match is not completed)
+  // Update live match data whenever match state changes (only if match is not completed and user is logged in)
   useEffect(() => {
-    if (matchComplete || match?.status === 'completed') {
-      return; // Don't update live match if match is completed
+    if (matchComplete || match?.status === 'completed' || !user) {
+      return; // Don't update live match if match is completed or user is not logged in
     }
     
     if (isMatchLiveOnThisDevice(match.id)) {
@@ -410,9 +419,10 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       };
       updateLiveMatch(match.id, matchData);
     }
-  }, [currentLeg, legScores, currentPlayer, currentTurn, matchComplete]);
+  }, [currentLeg, legScores, currentPlayer, currentTurn, matchComplete, user]);
 
   const addScore = (number) => {
+    if (isViewOnly) return; // Non-logged-in users cannot score
     if (currentTurn.darts >= 3) return;
     if (currentPlayer === null || currentPlayer === undefined || !currentPlayerData) return;
 
@@ -422,7 +432,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     if (number === 0) {
       // Miss
       scoreValue = 0;
-      label = 'Miss';
+      label = '0';
     } else if (number === 25) {
       // Bullseye - single bull (25 points) or double bull (50 points)
       // Triple 25 is not valid (there's no triple bull on the board)
@@ -526,6 +536,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   };
 
   const removeLastDart = () => {
+    if (isViewOnly) return; // Non-logged-in users cannot modify scores
     // Prevent rapid clicks
     if (isRemovingDart) {
       console.log('Remove dart already in progress, ignoring click');
@@ -915,6 +926,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
 
 
   const selectMatchStarter = (playerIndex) => {
+    if (isViewOnly) return; // Non-logged-in users cannot start matches
     setMatchStarter(playerIndex);
     setCurrentPlayer(playerIndex);
     setShowMatchStarter(false);
@@ -961,6 +973,23 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     return player.totalDarts > 0 ? (player.totalScore / player.totalDarts) * 3 : 0;
   };
 
+  // Get the last turn's throws for a player
+  const getLastTurnThrows = (playerIndex) => {
+    // First check if it's the current player's turn - show current turn throws
+    if (currentPlayer === playerIndex && currentTurn.scores.length > 0) {
+      return currentTurn.scores.map(s => s.label);
+    }
+    
+    // Otherwise, find the last completed turn for this player from history
+    for (let i = turnHistory.length - 1; i >= 0; i--) {
+      if (turnHistory[i].player === playerIndex && turnHistory[i].turn.scores.length > 0) {
+        return turnHistory[i].turn.scores.map(s => s.label);
+      }
+    }
+    
+    return [];
+  };
+
   if (matchComplete) {
     return (
       <div className="match-complete">
@@ -985,6 +1014,21 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   }
 
   if (showMatchStarter) {
+    if (isViewOnly) {
+      // Non-logged-in users cannot start matches - show view-only message
+      return (
+        <div className="leg-starter-dialog">
+          <div className="dialog-content">
+            <h2>View Only Mode</h2>
+            <p>You must be logged in to start or score matches. You can view live matches and standings without logging in.</p>
+            <button className="back-btn" onClick={onBack}>
+              <ArrowLeft size={20} />
+              Back to Tournament
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="leg-starter-dialog">
         <div className="dialog-content">
@@ -1010,99 +1054,108 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     );
   }
 
+  const player1LastThrows = getLastTurnThrows(0);
+  const player2LastThrows = getLastTurnThrows(1);
+
   return (
-    <div className="match-interface">
+    <div className="match-interface mobile-optimized">
       <div className="match-scoreboard">
-        <div className="player-score player1">
-          <div className="player-name">{match.player1?.name || 'Player 1'}</div>
-          <div className="legs-won">{legScores.player1.legs}</div>
+        <div className={`player-score player1 ${currentPlayer === 0 ? 'active-player' : ''}`}>
+          <div className="player-header">
+            <div className="player-name">{match.player1?.name || 'Player 1'}</div>
+            <div className="legs-won">{legScores.player1.legs}</div>
+          </div>
           <div className="current-score">{legScores.player1.currentScore}</div>
+          {/* Show individual throws */}
+          {player1LastThrows.length > 0 && (
+            <div className="last-throws">
+              {player1LastThrows.map((throwLabel, idx) => (
+                <span key={idx} className="throw-label">{throwLabel}</span>
+              ))}
+            </div>
+          )}
+          {/* Show stats */}
           <div className="player-stats">
             <span>Avg: {getAverage('player1').toFixed(1)}</span>
             <span>Darts: {legScores.player1.legDarts}</span>
-            {currentPlayer === 0 && (
-              <div className="current-turn-info">
-                <span>Turn: {currentTurn.score}</span>
-                <span>Darts: {currentTurn.darts}/3</span>
-              </div>
-            )}
           </div>
         </div>
 
-        <div className="vs-divider">
+        <div className="vs-divider mobile-hidden">
           <span>Leg {currentLeg}</span>
           <span className="match-settings-text">First to {matchSettings.legsToWin} legs</span>
         </div>
 
-        <div className="player-score player2">
-          <div className="player-name">{match.player2?.name || 'Player 2'}</div>
-          <div className="legs-won">{legScores.player2.legs}</div>
+        <div className={`player-score player2 ${currentPlayer === 1 ? 'active-player' : ''}`}>
+          <div className="player-header">
+            <div className="player-name">{match.player2?.name || 'Player 2'}</div>
+            <div className="legs-won">{legScores.player2.legs}</div>
+          </div>
           <div className="current-score">{legScores.player2.currentScore}</div>
+          {/* Show individual throws */}
+          {player2LastThrows.length > 0 && (
+            <div className="last-throws">
+              {player2LastThrows.map((throwLabel, idx) => (
+                <span key={idx} className="throw-label">{throwLabel}</span>
+              ))}
+            </div>
+          )}
+          {/* Show stats */}
           <div className="player-stats">
             <span>Avg: {getAverage('player2').toFixed(1)}</span>
             <span>Darts: {legScores.player2.legDarts}</span>
-            {currentPlayer === 1 && (
-              <div className="current-turn-info">
-                <span>Turn: {currentTurn.score}</span>
-                <span>Darts: {currentTurn.darts}/3</span>
-              </div>
-            )}
           </div>
         </div>
       </div>
 
 
       <div className="dart-board">
-        {/* Input Mode Selection */}
-        <div className="input-mode-selector">
-          <button 
-            className={`mode-btn ${inputMode === 'single' ? 'active' : ''}`}
-            onClick={() => setInputMode('single')}
-          >
-            Single
-          </button>
-          <button 
-            className={`mode-btn ${inputMode === 'double' ? 'active' : ''}`}
-            onClick={() => setInputMode('double')}
-          >
-            Double
-          </button>
-          <button 
-            className={`mode-btn ${inputMode === 'triple' ? 'active' : ''}`}
-            onClick={() => setInputMode('triple')}
-          >
-            Triple
-          </button>
-        </div>
-
-        {/* Number Selection and Remove Last */}
-        <div className="dart-numbers">
-          {dartNumbers.map((number, index) => (
-            <button
-              key={index}
-              className={`dart-btn ${number === 25 ? 'bull' : inputMode === 'triple' ? 'triple' : inputMode === 'double' ? 'double' : 'single'}`}
-              onClick={() => addScore(number)}
-              disabled={currentTurn.darts >= 3 || (number === 25 && inputMode === 'triple')}
-            >
-              {number === 0 ? 'Miss' : number === 25 ? '25' : number}
-            </button>
-          ))}
-          <button 
-            className="remove-last-btn dart-btn"
-            onClick={removeLastDart}
-            disabled={(currentTurn.scores.length === 0 && turnHistory.length === 0) || isRemovingDart}
-          >
-            <ArrowLeft size={20} />
-          </button>
-        </div>
+        {isViewOnly ? (
+          <div className="view-only-message">
+            <Eye size={48} />
+            <h3>View Only Mode</h3>
+            <p>You must be logged in to score matches. You can view live matches and standings without logging in.</p>
+          </div>
+        ) : (
+          <>
+            {/* Number Selection, Mode Selection, and Remove Last */}
+            <div className="dart-numbers">
+              {dartNumbers.map((number, index) => (
+                <button
+                  key={index}
+                  className={`dart-btn ${number === 25 ? 'bull' : inputMode === 'triple' ? 'triple' : inputMode === 'double' ? 'double' : 'single'}`}
+                  onClick={() => addScore(number)}
+                  disabled={currentTurn.darts >= 3 || (number === 25 && inputMode === 'triple')}
+                >
+                  {number === 0 ? '0' : number === 25 ? '25' : number}
+                </button>
+              ))}
+              {/* Mode buttons in same row */}
+              <button 
+                className={`mode-btn-inline ${inputMode === 'double' ? 'active' : ''}`}
+                onClick={() => setInputMode(inputMode === 'double' ? 'single' : 'double')}
+              >
+                Double
+              </button>
+              <button 
+                className={`mode-btn-inline ${inputMode === 'triple' ? 'active' : ''}`}
+                onClick={() => setInputMode(inputMode === 'triple' ? 'single' : 'triple')}
+              >
+                Triple
+              </button>
+              {/* Remove button */}
+              <button 
+                className="remove-last-btn dart-btn"
+                onClick={removeLastDart}
+                disabled={(currentTurn.scores.length === 0 && turnHistory.length === 0) || isRemovingDart}
+              >
+                <ArrowLeft size={20} />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
-      <div className="match-footer">
-        <button className="back-btn" onClick={onBack}>
-          <ArrowLeft size={20} />
-          Back to Tournament
-        </button>
-      </div>
     </div>
   );
 }
