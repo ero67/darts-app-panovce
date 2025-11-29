@@ -21,7 +21,6 @@ export function Auth() {
   const { signIn, signUp, resetPassword } = useAuth();
 
   const handleInputChange = (e) => {
-    console.log('Input change:', e.target.name, e.target.value);
     setFormData({
       ...formData,
       [e.target.name]: e.target.value,
@@ -57,7 +56,7 @@ export function Auth() {
 
         const { error } = await signUp(formData.email, formData.password, {
           full_name: formData.fullName,
-          role: 'admin', // All registered users are admins/scorers
+          // Role is not set by default - admins must be assigned manually via Supabase Dashboard
         });
 
         if (error) {

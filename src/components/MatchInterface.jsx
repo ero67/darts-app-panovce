@@ -54,8 +54,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       currentPlayer: null, // null means match hasn't started yet
       matchStarter: null,
       legScores: {
-        player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] },
-        player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] }
+        player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [], legDetails: [] },
+        player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [], legDetails: [] }
       },
       currentTurn: {
         score: 0,
@@ -75,8 +75,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   const [currentPlayer, setCurrentPlayer] = useState(initialState?.currentPlayer !== undefined ? initialState.currentPlayer : null);
   const [matchStarter, setMatchStarter] = useState(initialState?.matchStarter || null);
   const [legScores, setLegScores] = useState(initialState?.legScores || {
-    player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] },
-    player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] }
+    player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [], legDetails: [] },
+    player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [], legDetails: [] }
   });
   const [currentTurn, setCurrentTurn] = useState(initialState?.currentTurn || {
     score: 0,
@@ -89,6 +89,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   const [inputMode, setInputMode] = useState(initialState?.inputMode || 'single');
   const [showMatchStarter, setShowMatchStarter] = useState(initialState?.showMatchStarter || false);
   const [isRemovingDart, setIsRemovingDart] = useState(false); // Prevent rapid clicks
+  const [bustingPlayer, setBustingPlayer] = useState(null); // Track which player is busting (0 or 1)
 
   // Only show match starter dialog if it's a new match and no match starter has been chosen
   // This effect is now mainly for cases where the state changes after initial load
@@ -157,7 +158,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
               totalDarts: 0,
               legDarts: 0,
               legAverages: [],
-              checkouts: []
+              checkouts: [],
+              legDetails: []
             },
             player2: {
               legs: data.player2_legs || 0,
@@ -166,7 +168,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
               totalDarts: 0,
               legDarts: 0,
               legAverages: [],
-              checkouts: []
+              checkouts: [],
+              legDetails: []
             }
           },
           isInProgress,
@@ -483,22 +486,27 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       dartCount: currentTurn.dartCount + 1
     });
 
-    // Update player's current score immediately
+    // Calculate new score but don't update if it would be a bust
     const newCurrentScore = currentPlayerData.currentScore - scoreValue;
-    setLegScores(prev => ({
-      ...prev,
-      [`player${currentPlayer + 1}`]: {
-        ...prev[`player${currentPlayer + 1}`],
-        currentScore: newCurrentScore
-      }
-    }));
-
-    // Reset input mode after each dart
-    setInputMode('single');
-
-    // Check for bust immediately
+    
+    // Check for bust BEFORE updating the score display
     if (newCurrentScore < 0 || newCurrentScore === 1) {
-      // Bust - show visual feedback, restore score by adding back ALL darts in this turn, and switch player
+      // Bust - don't update score, just handle the bust
+      // Update turn to show the dart was thrown
+      setCurrentTurn({
+        score: newScore,
+        darts: newDarts,
+        scores: newScores,
+        dartCount: currentTurn.dartCount + 1
+      });
+      
+      // Reset input mode
+      setInputMode('single');
+      
+      // Show red background for bust
+      setBustingPlayer(currentPlayer);
+      
+      // Show visual feedback, restore score by adding back ALL darts in this turn, and switch player
       setTimeout(() => {
         setCurrentTurn(prev => ({
           ...prev,
@@ -514,11 +522,25 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
             currentScore: prev[`player${currentPlayer + 1}`].currentScore + newScore
           }
         }));
+        // Remove bust visual feedback
+        setBustingPlayer(null);
         // Switch to next player after bust
         setCurrentPlayer(prev => prev === 0 ? 1 : 0);
       }, 1000);
       return; // Exit early to prevent auto-finish
     }
+
+    // Update player's current score (only if not a bust)
+    setLegScores(prev => ({
+      ...prev,
+      [`player${currentPlayer + 1}`]: {
+        ...prev[`player${currentPlayer + 1}`],
+        currentScore: newCurrentScore
+      }
+    }));
+
+    // Reset input mode after each dart
+    setInputMode('single');
 
     // Auto-finish turn when 3 darts are thrown OR when score reaches 0
     if (newDarts === 3 || newCurrentScore === 0) {
@@ -702,16 +724,47 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       
       console.log('Valid checkout: Finished on double');
 
-      const checkout = turnData.scores.map(s => s.label).join(' + ');
+      // Calculate numeric checkout value (sum of all dart scores in the turn)
+      const checkout = turnData.scores.reduce((sum, dart) => sum + (dart.value || 0), 0);
       const dartsUsed = currentPlayerData.legDarts + turnData.darts;
       
       // Calculate leg average: (501 / darts) * 3
       const legAverage = (matchSettings.startingScore / dartsUsed) * 3;
       
       setLegScores(prev => {
+        const winnerKey = `player${currentPlayer + 1}`;
+        const opponentIndex = currentPlayer === 0 ? 1 : 0;
+        const opponentKey = `player${opponentIndex + 1}`;
+        const opponentLegDarts = prev[opponentKey].legDarts;
+        const opponentScoreRemaining = prev[opponentKey].currentScore;
+        const opponentLegAverage = opponentLegDarts > 0
+          ? ((matchSettings.startingScore - opponentScoreRemaining) / opponentLegDarts) * 3
+          : 0;
+
         const newLegs = prev[`player${currentPlayer + 1}`].legs + 1;
         const prevLegAverages = prev[`player${currentPlayer + 1}`].legAverages || [];
         const newLegAverages = [...prevLegAverages, legAverage];
+        const winnerLegDetails = [
+          ...(prev[winnerKey].legDetails || []),
+          {
+            leg: currentLeg,
+            darts: dartsUsed,
+            checkout,
+            average: legAverage,
+            isWin: true
+          }
+        ];
+        const opponentLegDetails = [
+          ...(prev[opponentKey].legDetails || []),
+          {
+            leg: currentLeg,
+            darts: opponentLegDarts,
+            checkout: null,
+            average: opponentLegAverage,
+            isWin: false,
+            remainingScore: opponentScoreRemaining
+          }
+        ];
         
         console.log('Awarding leg - player:', currentPlayer + 1, 'new legs:', newLegs);
         console.log('Previous legs:', prev[`player${currentPlayer + 1}`].legs);
@@ -719,15 +772,20 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         
         const updated = {
           ...prev,
-          [`player${currentPlayer + 1}`]: {
-            ...prev[`player${currentPlayer + 1}`],
+          [winnerKey]: {
+            ...prev[winnerKey],
             legs: newLegs,
             currentScore: matchSettings.startingScore,
             totalScore: prev[`player${currentPlayer + 1}`].totalScore + (matchSettings.startingScore - currentPlayerData.currentScore),
             totalDarts: prev[`player${currentPlayer + 1}`].totalDarts + dartsUsed, // Add to cumulative total
             legDarts: 0, // Reset leg darts for new leg
             legAverages: newLegAverages,
-            checkouts: [...prev[`player${currentPlayer + 1}`].checkouts, { leg: currentLeg, checkout, darts: turnData.darts }]
+            legDetails: winnerLegDetails,
+            checkouts: [...prev[`player${currentPlayer + 1}`].checkouts, { leg: currentLeg, checkout, darts: turnData.darts, totalDarts: dartsUsed }]
+          },
+          [opponentKey]: {
+            ...prev[opponentKey],
+            legDetails: opponentLegDetails
           }
         };
         
@@ -750,17 +808,51 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         const prevLegAverages = legScores[`player${currentPlayer + 1}`].legAverages || [];
         const newLegAverages = [...prevLegAverages, legAverage];
         
+        const winnerKey = `player${currentPlayer + 1}`;
+        const opponentIndex = currentPlayer === 0 ? 1 : 0;
+        const opponentKey = `player${opponentIndex + 1}`;
+        const opponentLegDarts = legScores[opponentKey].legDarts;
+        const opponentScoreRemaining = legScores[opponentKey].currentScore;
+        const opponentLegAverage = opponentLegDarts > 0
+          ? ((matchSettings.startingScore - opponentScoreRemaining) / opponentLegDarts) * 3
+          : 0;
+        const finalWinnerLegDetails = [
+          ...(legScores[winnerKey].legDetails || []),
+          {
+            leg: currentLeg,
+            darts: dartsUsed,
+            checkout,
+            average: legAverage,
+            isWin: true
+          }
+        ];
+        const finalOpponentLegDetails = [
+          ...(legScores[opponentKey].legDetails || []),
+          {
+            leg: currentLeg,
+            darts: opponentLegDarts,
+            checkout: null,
+            average: opponentLegAverage,
+            isWin: false,
+            remainingScore: opponentScoreRemaining
+          }
+        ];
         const finalLegScores = {
           ...legScores,
-          [`player${currentPlayer + 1}`]: {
-            ...legScores[`player${currentPlayer + 1}`],
+          [winnerKey]: {
+            ...legScores[winnerKey],
             legs: newLegs,
             currentScore: matchSettings.startingScore,
-            totalScore: legScores[`player${currentPlayer + 1}`].totalScore + (matchSettings.startingScore - currentPlayerData.currentScore),
-            totalDarts: legScores[`player${currentPlayer + 1}`].totalDarts + dartsUsed, // Add to cumulative total
+            totalScore: legScores[winnerKey].totalScore + (matchSettings.startingScore - currentPlayerData.currentScore),
+            totalDarts: legScores[winnerKey].totalDarts + dartsUsed, // Add to cumulative total
             legDarts: 0, // Reset leg darts
             legAverages: newLegAverages,
-            checkouts: [...legScores[`player${currentPlayer + 1}`].checkouts, { leg: currentLeg, checkout, darts: turnData.darts }]
+            legDetails: finalWinnerLegDetails,
+            checkouts: [...legScores[winnerKey].checkouts, { leg: currentLeg, checkout, darts: turnData.darts, totalDarts: dartsUsed }]
+          },
+          [opponentKey]: {
+            ...legScores[opponentKey],
+            legDetails: finalOpponentLegDetails
           }
         };
         completeMatch(finalLegScores);
@@ -909,14 +1001,16 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         totalDarts: finalLegScores.player1.totalDarts,
         average: player1MatchAverage,
         legAverages: player1LegAverages,
-        checkouts: finalLegScores.player1.checkouts
+        checkouts: finalLegScores.player1.checkouts,
+        legs: finalLegScores.player1.legDetails || []
       },
       player2Stats: {
         totalScore: finalLegScores.player2.totalScore,
         totalDarts: finalLegScores.player2.totalDarts,
         average: player2MatchAverage,
         legAverages: player2LegAverages,
-        checkouts: finalLegScores.player2.checkouts
+        checkouts: finalLegScores.player2.checkouts,
+        legs: finalLegScores.player2.legDetails || []
       }
     };
 
@@ -959,8 +1053,8 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         updateMatchToDatabase(match.id, {
           currentLeg: 1,
           legScores: {
-            player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] },
-            player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [] }
+            player1: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [], legDetails: [] },
+            player2: { legs: 0, currentScore: matchSettings.startingScore, totalScore: 0, totalDarts: 0, legDarts: 0, legAverages: [], checkouts: [], legDetails: [] }
           },
           currentPlayer: playerIndex
         });
@@ -1060,7 +1154,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   return (
     <div className="match-interface mobile-optimized">
       <div className="match-scoreboard">
-        <div className={`player-score player1 ${currentPlayer === 0 ? 'active-player' : ''}`}>
+        <div className={`player-score player1 ${currentPlayer === 0 ? 'active-player' : ''} ${bustingPlayer === 0 ? 'bust' : ''}`}>
           <div className="player-header">
             <div className="player-name">{match.player1?.name || 'Player 1'}</div>
             <div className="legs-won">{legScores.player1.legs}</div>
@@ -1086,7 +1180,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
           <span className="match-settings-text">First to {matchSettings.legsToWin} legs</span>
         </div>
 
-        <div className={`player-score player2 ${currentPlayer === 1 ? 'active-player' : ''}`}>
+        <div className={`player-score player2 ${currentPlayer === 1 ? 'active-player' : ''} ${bustingPlayer === 1 ? 'bust' : ''}`}>
           <div className="player-header">
             <div className="player-name">{match.player2?.name || 'Player 2'}</div>
             <div className="legs-won">{legScores.player2.legs}</div>

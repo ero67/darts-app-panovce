@@ -14,7 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 export function TournamentManagement({ tournament, onMatchStart, onBack, onDeleteTournament }) {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('groups'); // 'groups', 'matches', 'standings', 'playoffs'
+  const [activeTab, setActiveTab] = useState('groups'); // 'groups', 'matches', 'standings', 'playoffs', 'statistics'
   const [showEditSettings, setShowEditSettings] = useState(false);
   const [editingMatch, setEditingMatch] = useState(null); // Match being edited
   const [tournamentSettings, setTournamentSettings] = useState({
@@ -488,30 +488,64 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           <div key={group.id} className="group-matches">
             <h4>{group.name}</h4>
             <div className="matches-grid">
-              {group.matches.map(match => (
+              {group.matches.map(match => {
+                const isPlayer1Winner = match.status === 'completed' && match.result && match.result.winner === match.player1?.id;
+                const isPlayer2Winner = match.status === 'completed' && match.result && match.result.winner === match.player2?.id;
+                
+                return (
                 <div key={match.id} className="match-card">
-                  <div className="match-players">
-                    <span className="player">{match.player1?.name || 'Unknown Player'}</span>
-                    <span className="vs">vs</span>
-                    <span className="player">{match.player2?.name || 'Unknown Player'}</span>
+                  <div className="match-header">
+                    <div className="match-status">
+                      <span 
+                        className="status-badge"
+                        style={{ backgroundColor: getMatchStatusColor(match.status, match.id) }}
+                      >
+                        {getMatchStatusText(match.status, match.id)}
+                      </span>
+                      {isMatchActuallyLive(match.id) && (
+                        <div className="live-indicator">
+                          {isMatchInLocalStorage(match.id) ? (
+                            <Wifi size={14} className="live-icon this-device" />
+                          ) : (
+                            <Eye size={14} className="live-icon other-device" />
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="match-status">
-                    <span 
-                      className="status-badge"
-                      style={{ backgroundColor: getMatchStatusColor(match.status, match.id) }}
-                    >
-                      {getMatchStatusText(match.status, match.id)}
-                    </span>
-                    {isMatchActuallyLive(match.id) && (
-                      <div className="live-indicator">
-                        {isMatchInLocalStorage(match.id) ? (
-                          <Wifi size={14} className="live-icon this-device" />
-                        ) : (
-                          <Eye size={14} className="live-icon other-device" />
-                        )}
+                  {match.status === 'completed' && match.result ? (
+                    <div className="match-result-compact">
+                      <div className="player-result">
+                        <div className="player-name-row">
+                          <span className={`player-name ${isPlayer1Winner ? 'winner' : ''}`}>
+                            {match.player1?.name || 'Unknown Player'}
+                          </span>
+                          <span className="score">{match.result.player1Legs}</span>
+                        </div>
+                        <div className="player-average-compact">
+                          {match.result.player1Stats?.average ? match.result.player1Stats.average.toFixed(1) : '0.0'}
+                        </div>
                       </div>
-                    )}
-                  </div>
+                      <div className="score-divider">:</div>
+                      <div className="player-result">
+                        <div className="player-name-row">
+                          <span className="score">{match.result.player2Legs}</span>
+                          <span className={`player-name ${isPlayer2Winner ? 'winner' : ''}`}>
+                            {match.player2?.name || 'Unknown Player'}
+                          </span>
+                        </div>
+                        <div className="player-average-compact">
+                          {match.result.player2Stats?.average ? match.result.player2Stats.average.toFixed(1) : '0.0'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="match-players-compact">
+                      <span className="player">{match.player1?.name || 'Unknown Player'}</span>
+                      <span className="vs">vs</span>
+                      <span className="player">{match.player2?.name || 'Unknown Player'}</span>
+                    </div>
+                  )}
                   {match.status === 'pending' && !isMatchActuallyLive(match.id) && (
                     user ? (
                       <button 
@@ -574,27 +608,8 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                       </button>
                     )
                   )}
-                  {match.status === 'completed' && match.result && (
-                    <div className="match-result">
-                      <div className="result-score">
-                        {match.result.player1Legs} - {match.result.player2Legs}
-                      </div>
-                      <div className="result-averages">
-                        <div className="player-average">
-                          <span className="average-value">{match.result.player1Stats?.average ? match.result.player1Stats.average.toFixed(1) : '0.0'}</span>
-                        </div>
-                        <span className="avg-label">{t('management.avg')}</span>
-                        <div className="player-average">
-                          <span className="average-value">{match.result.player2Stats?.average ? match.result.player2Stats.average.toFixed(1) : '0.0'}</span>
-                        </div>
-                      </div>
-                      <div className="result-winner">
-                        {t('management.winner')}: {match.result.winner === match.player1?.id ? match.player1?.name || t('common.unknown') : match.player2?.name || t('common.unknown')}
-                      </div>
-                    </div>
-                  )}
                 </div>
-              ))}
+              )})}
             </div>
           </div>
         )) : (
@@ -656,6 +671,265 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       </div>
     </div>
   );
+
+  const renderStatistics = () => {
+    // Helper function to get checkout value (handles both numeric and legacy string format)
+    const getCheckoutValue = (checkout) => {
+      if (typeof checkout === 'number') {
+        return checkout;
+      }
+      if (typeof checkout === 'string') {
+        // Legacy format: parse combination string like "T20 + T20 + D25" -> 170
+        const parts = checkout.split('+').map(p => p.trim());
+        let total = 0;
+        parts.forEach(part => {
+          part = part.trim();
+          if (part.startsWith('T')) {
+            const num = parseInt(part.substring(1));
+            total += num * 3;
+          } else if (part.startsWith('D')) {
+            const num = parseInt(part.substring(1));
+            total += num * 2;
+          } else if (part.startsWith('S')) {
+            const num = parseInt(part.substring(1));
+            total += num;
+          } else {
+            const num = parseInt(part);
+            if (!isNaN(num)) total += num;
+          }
+        });
+        return total;
+      }
+      return 0;
+    };
+
+    // Collect all statistics from completed matches
+    const allAverages = [];
+    const allCheckouts = [];
+    const allLegs = [];
+    const collectLegs = (playerStats, player, opponent, matchId) => {
+      if (!playerStats?.legs?.length) {
+        return false;
+      }
+      playerStats.legs.forEach(leg => {
+        if (!leg || !leg.isWin || !leg.darts) {
+          return;
+        }
+        allLegs.push({
+          player,
+          darts: leg.darts,
+          leg: leg.leg,
+          checkout: leg.checkout || null,
+          matchId,
+          opponent: opponent?.name || 'Unknown'
+        });
+      });
+      return true;
+    };
+
+    // Iterate through all groups and matches
+    if (tournament.groups) {
+      tournament.groups.forEach(group => {
+        if (group.matches) {
+          group.matches.forEach(match => {
+            if (match.status === 'completed' && match.result) {
+              // Debug: Log match result structure
+              if (match.id && (!match.result.player1Stats?.checkouts || !match.result.player2Stats?.checkouts)) {
+                console.log('Match result structure for match', match.id, ':', {
+                  hasPlayer1Stats: !!match.result.player1Stats,
+                  hasPlayer1Checkouts: !!match.result.player1Stats?.checkouts,
+                  player1CheckoutsCount: match.result.player1Stats?.checkouts?.length || 0,
+                  hasPlayer1LegAverages: !!match.result.player1Stats?.legAverages,
+                  player1LegAveragesCount: match.result.player1Stats?.legAverages?.length || 0,
+                  hasPlayer2Stats: !!match.result.player2Stats,
+                  hasPlayer2Checkouts: !!match.result.player2Stats?.checkouts,
+                  player2CheckoutsCount: match.result.player2Stats?.checkouts?.length || 0,
+                  hasPlayer2LegAverages: !!match.result.player2Stats?.legAverages,
+                  player2LegAveragesCount: match.result.player2Stats?.legAverages?.length || 0
+                });
+              }
+              
+              // Best averages
+              if (match.result.player1Stats?.average) {
+                allAverages.push({
+                  player: match.player1,
+                  average: match.result.player1Stats.average,
+                  matchId: match.id,
+                  opponent: match.player2?.name || 'Unknown'
+                });
+              }
+              if (match.result.player2Stats?.average) {
+                allAverages.push({
+                  player: match.player2,
+                  average: match.result.player2Stats.average,
+                  matchId: match.id,
+                  opponent: match.player1?.name || 'Unknown'
+                });
+              }
+
+              // Best checkouts
+              const addCheckoutEntries = (playerStats, player, opponent) => {
+                if (!playerStats?.checkouts?.length) {
+                  return;
+                }
+                playerStats.checkouts.forEach(checkout => {
+                  if (checkout?.checkout === null || checkout?.checkout === undefined) {
+                    return;
+                  }
+                  // Checkout is now stored as a number, but handle legacy string format too
+                  const checkoutValue = getCheckoutValue(checkout.checkout);
+                  if (checkoutValue > 0) {
+                    allCheckouts.push({
+                      player,
+                      checkout: checkoutValue,
+                      leg: checkout.leg,
+                      darts: checkout.totalDarts || checkout.darts,
+                      matchId: match.id,
+                      opponent: opponent?.name || 'Unknown'
+                    });
+                  }
+                });
+              };
+
+              addCheckoutEntries(match.result.player1Stats, match.player1, match.player2);
+              addCheckoutEntries(match.result.player2Stats, match.player2, match.player1);
+
+              const player1LegsAdded = collectLegs(match.result.player1Stats, match.player1, match.player2, match.id);
+              const player2LegsAdded = collectLegs(match.result.player2Stats, match.player2, match.player1, match.id);
+
+              if (!player1LegsAdded && !player2LegsAdded) {
+                // Fallback for legacy data without legs array
+                const fallbackFromCheckouts = (playerStats, player, opponent) => {
+                  if (!playerStats?.checkouts?.length) return;
+                  playerStats.checkouts.forEach(checkout => {
+                    if (!checkout?.checkout) return;
+                    const startingScore = match.startingScore || 501;
+                    let totalDarts = checkout.totalDarts || checkout.darts;
+                    if ((!totalDarts || totalDarts <= 3) && playerStats.legAverages?.length >= checkout.leg) {
+                      const legAverage = playerStats.legAverages[checkout.leg - 1];
+                      if (legAverage > 0) {
+                        totalDarts = Math.round((startingScore / legAverage) * 3);
+                      }
+                    }
+                    if (!totalDarts) return;
+                    allLegs.push({
+                      player,
+                      darts: totalDarts,
+                      leg: checkout.leg,
+                      checkout: checkout.checkout,
+                      matchId: match.id,
+                      opponent: opponent?.name || 'Unknown'
+                    });
+                  });
+                };
+                fallbackFromCheckouts(match.result.player1Stats, match.player1, match.player2);
+                fallbackFromCheckouts(match.result.player2Stats, match.player2, match.player1);
+              }
+            }
+          });
+        }
+      });
+    }
+
+    // Sort leaderboards
+    // For averages: group by player and take only the best average for each player
+    const playerBestAverages = new Map();
+    allAverages.forEach(entry => {
+      const playerId = entry.player?.id;
+      if (!playerId) return;
+      const existing = playerBestAverages.get(playerId);
+      if (!existing || entry.average > existing.average) {
+        playerBestAverages.set(playerId, entry);
+      }
+    });
+    const bestAverages = Array.from(playerBestAverages.values())
+      .sort((a, b) => b.average - a.average)
+      .slice(0, 10);
+    
+    const bestCheckouts = [...allCheckouts].sort((a, b) => b.checkout - a.checkout).slice(0, 10);
+    const fewestDarts = [...allLegs].sort((a, b) => a.darts - b.darts).slice(0, 10);
+
+    return (
+      <div className="statistics-view">
+        <h3>{t('management.statistics') || 'Tournament Statistics'}</h3>
+        
+        {/* Best Averages Leaderboard */}
+        <div className="statistics-section">
+          <h4>{t('management.bestAverages') || 'Best Match Averages'}</h4>
+          {bestAverages.length > 0 ? (
+            <div className="leaderboard">
+              <div className="leaderboard-header">
+                <span>#</span>
+                <span>{t('management.player')}</span>
+                <span>{t('management.avg')}</span>
+                <span>{t('management.opponent') || 'Opponent'}</span>
+              </div>
+              {bestAverages.map((entry, index) => (
+                <div key={`avg-${index}`} className="leaderboard-row">
+                  <span className={`position ${index === 0 ? 'first' : index === 1 ? 'second' : index === 2 ? 'third' : ''}`}>{index + 1}</span>
+                  <span className="player-name">{entry.player?.name || 'Unknown'}</span>
+                  <span className="value">{entry.average.toFixed(1)}</span>
+                  <span className="opponent">{entry.opponent}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="no-stats">{t('management.noStatisticsYet') || 'No statistics available yet.'}</p>
+          )}
+        </div>
+
+        {/* Best Checkouts Leaderboard */}
+        <div className="statistics-section">
+          <h4>{t('management.bestCheckouts') || 'Best Checkouts'}</h4>
+          {bestCheckouts.length > 0 ? (
+            <div className="leaderboard">
+              <div className="leaderboard-header">
+                <span>#</span>
+                <span>{t('management.player')}</span>
+                <span>{t('management.checkout') || 'Checkout'}</span>
+                <span>{t('management.opponent') || 'Opponent'}</span>
+              </div>
+              {bestCheckouts.map((entry, index) => (
+                <div key={`checkout-${index}`} className="leaderboard-row">
+                  <span className={`position ${index === 0 ? 'first' : index === 1 ? 'second' : index === 2 ? 'third' : ''}`}>{index + 1}</span>
+                  <span className="player-name">{entry.player?.name || 'Unknown'}</span>
+                  <span className="value">{entry.checkout}</span>
+                  <span className="opponent">{entry.opponent}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="no-stats">{t('management.noStatisticsYet') || 'No statistics available yet.'}</p>
+          )}
+        </div>
+
+        {/* Fewest Darts Leaderboard */}
+        <div className="statistics-section">
+          <h4>{t('management.fewestDarts') || 'Legs with Fewest Darts'}</h4>
+          {fewestDarts.length > 0 ? (
+            <div className="leaderboard">
+              <div className="leaderboard-header">
+                <span>#</span>
+                <span>{t('management.player')}</span>
+                <span>{t('management.darts') || 'Darts'}</span>
+                <span>{t('management.opponent') || 'Opponent'}</span>
+              </div>
+              {fewestDarts.map((entry, index) => (
+                <div key={`darts-${index}`} className="leaderboard-row">
+                  <span className={`position ${index === 0 ? 'first' : index === 1 ? 'second' : index === 2 ? 'third' : ''}`}>{index + 1}</span>
+                  <span className="player-name">{entry.player?.name || 'Unknown'}</span>
+                  <span className="value">{entry.darts}</span>
+                  <span className="opponent">{entry.opponent}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="no-stats">{t('management.noStatisticsYet') || 'No statistics available yet.'}</p>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderPlayoffs = () => {
     // Check if playoffs are enabled
@@ -950,14 +1224,16 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           </div>
         </div>
         <div className="header-actions">
-          <button 
-            className="edit-settings-btn"
-            onClick={() => setShowEditSettings(true)}
-            title={t('registration.editTournamentSettings')}
-          >
-            <Settings size={18} />
-            {t('registration.editSettings')}
-          </button>
+          {user && (
+            <button 
+              className="edit-settings-btn"
+              onClick={() => setShowEditSettings(true)}
+              title={t('registration.editTournamentSettings')}
+            >
+              <Settings size={18} />
+              {t('registration.editSettings')}
+            </button>
+          )}
           {isAdmin && (
             <button 
               className="delete-tournament-btn"
@@ -998,6 +1274,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             {t('management.playoffs')}
           </button>
         )}
+        <button 
+          className={activeTab === 'statistics' ? 'active' : ''}
+          onClick={() => setActiveTab('statistics')}
+        >
+          {t('management.statistics') || 'Statistics'}
+        </button>
       </div>
 
       <div className="management-content">
@@ -1005,10 +1287,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
         {activeTab === 'matches' && renderMatches()}
         {activeTab === 'standings' && renderStandings()}
         {activeTab === 'playoffs' && renderPlayoffs()}
+        {activeTab === 'statistics' && renderStatistics()}
       </div>
 
       {/* Edit Settings Modal */}
-      {showEditSettings && (
+      {showEditSettings && user && (
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-header">

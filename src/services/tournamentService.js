@@ -469,25 +469,48 @@ export const tournamentService = {
                   legsToWin: match.legs_to_win,
                   startingScore: match.starting_score,
                   startedByUserId: match.started_by_user_id,
-                  result: match.winner_id ? {
-                    winner: match.winner_id,
-                    player1Id: match.player1_id,
-                    player2Id: match.player2_id,
-                    player1Legs: match.player1_legs,
-                    player2Legs: match.player2_legs,
-                    player1Stats: player1Stats ? {
-                      totalScore: player1Stats.total_score,
-                      totalDarts: player1Stats.total_darts,
-                      average: parseFloat(player1Stats.average),
-                      checkouts: []
-                    } : null,
-                    player2Stats: player2Stats ? {
-                      totalScore: player2Stats.total_score,
-                      totalDarts: player2Stats.total_darts,
-                      average: parseFloat(player2Stats.average),
-                      checkouts: []
-                    } : null
-                  } : null
+                  result: match.winner_id ? (() => {
+                    // If result JSONB exists, use it (it contains full data including checkouts and legAverages)
+                    if (match.result) {
+                      // Parse if it's a string (JSONB from Supabase might be string)
+                      let parsedResult = match.result;
+                      if (typeof parsedResult === 'string') {
+                        try {
+                          parsedResult = JSON.parse(parsedResult);
+                        } catch (e) {
+                          console.error('Error parsing match result:', e);
+                          parsedResult = null;
+                        }
+                      }
+                      if (parsedResult) {
+                        return parsedResult;
+                      }
+                    }
+                    // Fallback to basic stats if result doesn't exist
+                    return {
+                      winner: match.winner_id,
+                      player1Id: match.player1_id,
+                      player2Id: match.player2_id,
+                      player1Legs: match.player1_legs,
+                      player2Legs: match.player2_legs,
+                      player1Stats: player1Stats ? {
+                        totalScore: player1Stats.total_score,
+                        totalDarts: player1Stats.total_darts,
+                        average: parseFloat(player1Stats.average),
+                        checkouts: [],
+                        legAverages: [],
+                        legs: []
+                      } : null,
+                      player2Stats: player2Stats ? {
+                        totalScore: player2Stats.total_score,
+                        totalDarts: player2Stats.total_darts,
+                        average: parseFloat(player2Stats.average),
+                        checkouts: [],
+                        legAverages: [],
+                        legs: []
+                      } : null
+                    };
+                  })() : null
                 };
               })
 
@@ -520,11 +543,30 @@ export const tournamentService = {
               isPlayoff: true,
               playoffRound: match.playoff_round,
               playoffMatchNumber: match.playoff_match_number,
-              result: match.winner_id ? {
-                winner: match.winner_id,
-                player1Legs: match.player1_legs,
-                player2Legs: match.player2_legs
-              } : null
+              result: match.winner_id ? (() => {
+                // If result JSONB exists, use it (it contains full data including checkouts and legAverages)
+                if (match.result) {
+                  // Parse if it's a string (JSONB from Supabase might be string)
+                  let parsedResult = match.result;
+                  if (typeof parsedResult === 'string') {
+                    try {
+                      parsedResult = JSON.parse(parsedResult);
+                    } catch (e) {
+                      console.error('Error parsing playoff match result:', e);
+                      parsedResult = null;
+                    }
+                  }
+                  if (parsedResult) {
+                    return parsedResult;
+                  }
+                }
+                // Fallback to basic stats if result doesn't exist
+                return {
+                  winner: match.winner_id,
+                  player1Legs: match.player1_legs,
+                  player2Legs: match.player2_legs
+                };
+              })() : null
             };
           });
 
@@ -650,11 +692,28 @@ export const tournamentService = {
           isPlayoff: true,
           playoffRound: match.playoff_round,
           playoffMatchNumber: match.playoff_match_number,
-          result: match.winner_id ? {
-            winner: match.winner_id,
-            player1Legs: match.player1_legs,
-            player2Legs: match.player2_legs
-          } : null
+          result: match.winner_id ? (() => {
+            // If result JSONB exists, use it (it contains full data including checkouts and legAverages)
+            if (match.result) {
+              // Parse if it's a string (JSONB from Supabase might be string)
+              let parsedResult = match.result;
+              if (typeof parsedResult === 'string') {
+                try {
+                  parsedResult = JSON.parse(parsedResult);
+                } catch (e) {
+                  console.error('Error parsing playoff match result:', e);
+                  parsedResult = null;
+                }
+              }
+              return parsedResult;
+            }
+            // Fallback to basic stats if result doesn't exist
+            return {
+              winner: match.winner_id,
+              player1Legs: match.player1_legs,
+              player2Legs: match.player2_legs
+            };
+          })() : null
         }));
 
         return {
@@ -689,21 +748,45 @@ export const tournamentService = {
                 legsToWin: match.legs_to_win,
                 startingScore: match.starting_score,
                 startedByUserId: match.started_by_user_id,
-                result: match.winner_id ? {
-                  winner: match.winner_id,
-                  player1Legs: match.player1_legs,
-                  player2Legs: match.player2_legs,
-                  player1Stats: player1StatsData ? {
-                    totalScore: player1StatsData.total_score || 0,
-                    totalDarts: player1StatsData.total_darts || 0,
-                    average: player1StatsData.average ? parseFloat(player1StatsData.average) : 0
-                  } : null,
-                  player2Stats: player2StatsData ? {
-                    totalScore: player2StatsData.total_score || 0,
-                    totalDarts: player2StatsData.total_darts || 0,
-                    average: player2StatsData.average ? parseFloat(player2StatsData.average) : 0
-                  } : null
-                } : null
+                result: match.winner_id ? (() => {
+                  // If result JSONB exists, use it (it contains full data including checkouts and legAverages)
+                  if (match.result) {
+                    // Parse if it's a string (JSONB from Supabase might be string)
+                    let parsedResult = match.result;
+                    if (typeof parsedResult === 'string') {
+                      try {
+                        parsedResult = JSON.parse(parsedResult);
+                      } catch (e) {
+                        console.error('Error parsing match result:', e);
+                        parsedResult = null;
+                      }
+                    }
+                    // Ensure the result has the expected structure
+                    if (parsedResult && parsedResult.player1Stats && !parsedResult.player1Stats.checkouts) {
+                      console.warn('Match result missing checkouts for player1:', match.id);
+                    }
+                    if (parsedResult && parsedResult.player2Stats && !parsedResult.player2Stats.checkouts) {
+                      console.warn('Match result missing checkouts for player2:', match.id);
+                    }
+                    return parsedResult;
+                  }
+                  // Fallback to basic stats if result doesn't exist
+                  return {
+                    winner: match.winner_id,
+                    player1Legs: match.player1_legs,
+                    player2Legs: match.player2_legs,
+                    player1Stats: player1StatsData ? {
+                      totalScore: player1StatsData.total_score || 0,
+                      totalDarts: player1StatsData.total_darts || 0,
+                      average: player1StatsData.average ? parseFloat(player1StatsData.average) : 0
+                    } : null,
+                    player2Stats: player2StatsData ? {
+                      totalScore: player2StatsData.total_score || 0,
+                      totalDarts: player2StatsData.total_darts || 0,
+                      average: player2StatsData.average ? parseFloat(player2StatsData.average) : 0
+                    } : null
+                  };
+                })() : null
               };
             }),
             standings: []
@@ -1336,6 +1419,28 @@ export const matchService = {
         player1_legs: matchResult.player1Legs,
         player2_legs: matchResult.player2Legs,
         updated_at: new Date().toISOString(),
+        // Save full match result including checkouts and leg averages
+        result: {
+          winner: matchResult.winner,
+          player1Legs: matchResult.player1Legs,
+          player2Legs: matchResult.player2Legs,
+          player1Stats: {
+            totalScore: matchResult.player1Stats?.totalScore || 0,
+            totalDarts: matchResult.player1Stats?.totalDarts || 0,
+            average: matchResult.player1Stats?.average || 0,
+            legAverages: matchResult.player1Stats?.legAverages || [],
+            checkouts: matchResult.player1Stats?.checkouts || [],
+            legs: matchResult.player1Stats?.legs || []
+          },
+          player2Stats: {
+            totalScore: matchResult.player2Stats?.totalScore || 0,
+            totalDarts: matchResult.player2Stats?.totalDarts || 0,
+            average: matchResult.player2Stats?.average || 0,
+            legAverages: matchResult.player2Stats?.legAverages || [],
+            checkouts: matchResult.player2Stats?.checkouts || [],
+            legs: matchResult.player2Stats?.legs || []
+          }
+        },
         // Clear live match tracking fields
         live_device_id: null,
         live_started_at: null,
@@ -1484,13 +1589,46 @@ export const matchService = {
         }
       });
 
-      // Create leg records for each leg played
+      // Create leg records for each leg played with actual data
       const legPromises = []
+      const player1LegAverages = matchResult.player1Stats?.legAverages || [];
+      const player2LegAverages = matchResult.player2Stats?.legAverages || [];
+      const player1Checkouts = matchResult.player1Stats?.checkouts || [];
+      const player2Checkouts = matchResult.player2Stats?.checkouts || [];
+      
+      // Get starting score from match data or default to 501
+      const { data: matchData } = await supabase
+        .from('matches')
+        .select('starting_score')
+        .eq('id', matchResult.matchId)
+        .single();
+      const startingScore = matchData?.starting_score || 501;
+      
       for (let legNum = 1; legNum <= Math.max(matchResult.player1Legs, matchResult.player2Legs); legNum++) {
         const legId = generateId()
         const winnerId = legNum <= matchResult.player1Legs ? 
           (matchResult.winner === matchResult.player1Id ? matchResult.player1Id : matchResult.player2Id) :
           (matchResult.winner === matchResult.player1Id ? matchResult.player2Id : matchResult.player1Id)
+        
+        // Find checkout for this leg
+        const player1Checkout = player1Checkouts.find(c => c.leg === legNum);
+        const player2Checkout = player2Checkouts.find(c => c.leg === legNum);
+        
+        // Calculate darts for this leg from leg average
+        let player1Darts = 0;
+        let player2Darts = 0;
+        let player1Average = 0;
+        let player2Average = 0;
+        
+        if (legNum <= player1LegAverages.length && player1LegAverages[legNum - 1] > 0) {
+          player1Average = player1LegAverages[legNum - 1];
+          player1Darts = Math.round((startingScore / player1Average) * 3);
+        }
+        
+        if (legNum <= player2LegAverages.length && player2LegAverages[legNum - 1] > 0) {
+          player2Average = player2LegAverages[legNum - 1];
+          player2Darts = Math.round((startingScore / player2Average) * 3);
+        }
         
         legPromises.push(
           supabase
@@ -1500,10 +1638,14 @@ export const matchService = {
               match_id: matchResult.matchId,
               leg_number: legNum,
               winner_id: winnerId,
-              player1_darts: 15, // Default, would need actual dart count
-              player2_darts: 15, // Default, would need actual dart count
-              player1_checkout: 'D20', // Default, would need actual checkout
-              player2_checkout: null // Default, would need actual checkout
+              player1_id: matchResult.player1Id,
+              player2_id: matchResult.player2Id,
+              player1_darts: player1Darts,
+              player2_darts: player2Darts,
+              player1_average: player1Average,
+              player2_average: player2Average,
+              player1_checkout: player1Checkout?.checkout || null,
+              player2_checkout: player2Checkout?.checkout || null
             })
         )
       }

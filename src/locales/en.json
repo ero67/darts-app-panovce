@@ -206,7 +206,17 @@
     "playoffsAvailableAfterGroups": "Playoffs will be available once group stage is completed.",
     "editMatchPlayers": "Edit Match Players",
     "playoffMatchUpdated": "Playoff match updated successfully",
-    "failedToUpdatePlayoffMatch": "Failed to update playoff match"
+    "failedToUpdatePlayoffMatch": "Failed to update playoff match",
+    "statistics": "Statistics",
+    "bestAverages": "Best Match Averages",
+    "bestCheckouts": "Best Checkouts",
+    "fewestDarts": "Legs with Fewest Darts",
+    "opponent": "Opponent",
+    "checkout": "Checkout",
+    "leg": "Leg",
+    "darts": "Darts",
+    "noStatisticsYet": "No statistics available yet.",
+    "loginToStartMatch": "Login required to start match"
   },
   "auth": {
     "appTitle": "Darts Tournament Manager",

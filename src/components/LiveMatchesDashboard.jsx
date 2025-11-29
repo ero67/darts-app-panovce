@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Play, Eye, Clock, Users, Trophy, Filter } from 'lucide-react';
+import { Clock, Users, Trophy, Filter } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 
 const LiveMatchesDashboard = () => {
@@ -11,7 +10,6 @@ const LiveMatchesDashboard = () => {
   const [selectedTournament, setSelectedTournament] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
 
   useEffect(() => {
     // Load tournaments and initial live matches
@@ -192,10 +190,6 @@ const LiveMatchesDashboard = () => {
     }
   };
 
-  const handleViewMatch = (match) => {
-    // Navigate to the match for viewing only
-    navigate(`/match/${match.id}`);
-  };
 
   const formatTimeAgo = (timestamp) => {
     if (!timestamp) return 'Unknown';
@@ -328,15 +322,6 @@ const LiveMatchesDashboard = () => {
                 </div>
               </div>
 
-              <div className="match-actions">
-                <button 
-                  className="view-match-btn"
-                  onClick={() => handleViewMatch(match)}
-                >
-                  <Eye size={16} />
-                  {t('liveMatches.viewMatch')}
-                </button>
-              </div>
             </div>
           ))}
         </div>

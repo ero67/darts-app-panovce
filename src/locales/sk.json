@@ -206,7 +206,17 @@
     "playoffsAvailableAfterGroups": "Play-off bude dostupné po dokončení skupinovej fázy.",
     "editMatchPlayers": "Upraviť Hráčov Zápasu",
     "playoffMatchUpdated": "Playoff zápas bol úspešne aktualizovaný",
-    "failedToUpdatePlayoffMatch": "Nepodarilo sa aktualizovať playoff zápas"
+    "failedToUpdatePlayoffMatch": "Nepodarilo sa aktualizovať playoff zápas",
+    "statistics": "Štatistiky",
+    "bestAverages": "Najlepšie Priemery v Zápasoch",
+    "bestCheckouts": "Najlepšie Checkouty",
+    "fewestDarts": "Legy s Najmenším počtom Šípok",
+    "opponent": "Súper",
+    "checkout": "Checkout",
+    "leg": "Leg",
+    "darts": "Šípky",
+    "noStatisticsYet": "Zatiaľ nie sú dostupné žiadne štatistiky.",
+    "loginToStartMatch": "Na spustenie zápasu je potrebné sa prihlásiť"
   },
   "auth": {
     "appTitle": "Správca Šípkových Turnajov",
