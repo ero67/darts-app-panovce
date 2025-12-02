@@ -93,40 +93,95 @@ function tournamentReducer(state, action) {
             foundMatch.status = 'completed';
             foundMatch.result = matchResult;
             
-            // Get the winner player object
+            // Get the winner and loser player objects
             const winnerId = matchResult.winner;
             const winnerPlayer = matchResult.winner === matchResult.player1Id 
               ? { id: matchResult.player1Id, name: foundMatch.player1?.name }
               : { id: matchResult.player2Id, name: foundMatch.player2?.name };
             
+            const loserPlayer = matchResult.winner === matchResult.player1Id 
+              ? { id: matchResult.player2Id, name: foundMatch.player2?.name }
+              : { id: matchResult.player1Id, name: foundMatch.player1?.name };
+            
+            // Check if this is a semifinal match (round with 2 matches = 4 players)
+            const currentRound = rounds[foundRoundIndex];
+            const isSemifinal = currentRound && currentRound.matches && currentRound.matches.length === 2 && foundRoundIndex < rounds.length - 1;
             
             // Advance winner to next round if not the final
             if (foundRoundIndex < rounds.length - 1) {
               const nextRound = rounds[foundRoundIndex + 1];
               if (nextRound && nextRound.matches) {
-                // Determine which match in next round this winner should go to
-                // In a bracket: matches 0-1 -> match 0, matches 2-3 -> match 1, etc.
-                const nextMatchIndex = Math.floor(foundMatchIndex / 2);
-                const nextMatch = nextRound.matches[nextMatchIndex];
+                // Find the final match (not 3rd place match)
+                const finalMatch = nextRound.matches.find(m => !m.isThirdPlaceMatch);
                 
-                if (nextMatch) {
-                  // Determine if winner should be player1 or player2 in next match
-                  // First match of pair (0, 2, 4...) -> player1, second match (1, 3, 5...) -> player2
-                  const isFirstMatchOfPair = (foundMatchIndex % 2 === 0);
-                  if (isFirstMatchOfPair) {
-                    nextMatch.player1 = winnerPlayer;
-                  } else {
-                    nextMatch.player2 = winnerPlayer;
+                if (finalMatch) {
+                  // Determine which position in final match
+                  // First semifinal winner -> player1, second semifinal winner -> player2
+                  if (foundMatchIndex === 0) {
+                    finalMatch.player1 = winnerPlayer;
+                  } else if (foundMatchIndex === 1) {
+                    finalMatch.player2 = winnerPlayer;
                   }
                   
                   // Update match status if both players are set
-                  if (nextMatch.player1 && nextMatch.player2) {
-                    nextMatch.status = 'pending';
+                  if (finalMatch.player1 && finalMatch.player2) {
+                    finalMatch.status = 'pending';
                   }
-                  
                 } else {
-                  console.error('Next match not found:', nextMatchIndex, 'in round:', nextRound.name);
+                  // Fallback to old logic if no final match found (for brackets without 3rd place match)
+                  const nextMatchIndex = Math.floor(foundMatchIndex / 2);
+                  const nextMatch = nextRound.matches[nextMatchIndex];
+                  
+                  if (nextMatch && !nextMatch.isThirdPlaceMatch) {
+                    const isFirstMatchOfPair = (foundMatchIndex % 2 === 0);
+                    if (isFirstMatchOfPair) {
+                      nextMatch.player1 = winnerPlayer;
+                    } else {
+                      nextMatch.player2 = winnerPlayer;
+                    }
+                    
+                    if (nextMatch.player1 && nextMatch.player2) {
+                      nextMatch.status = 'pending';
+                    }
+                  }
                 }
+              }
+            }
+            
+            // If this is a semifinal, assign loser to 3rd place match
+            if (isSemifinal && rounds.length > 0) {
+              const finalRound = rounds[rounds.length - 1];
+              const thirdPlaceMatch = finalRound.matches.find(m => m.isThirdPlaceMatch);
+              
+              if (thirdPlaceMatch) {
+                // Determine which position in 3rd place match (first semifinal loser -> player1, second semifinal loser -> player2)
+                if (foundMatchIndex === 0) {
+                  thirdPlaceMatch.player1 = loserPlayer;
+                } else if (foundMatchIndex === 1) {
+                  thirdPlaceMatch.player2 = loserPlayer;
+                }
+                
+                // Update match status if both players are set
+                if (thirdPlaceMatch.player1 && thirdPlaceMatch.player2) {
+                  thirdPlaceMatch.status = 'pending';
+                }
+              }
+            }
+            
+            // Check if tournament is complete (final and 3rd place match are both finished)
+            if (rounds.length > 0) {
+              const finalRound = rounds[rounds.length - 1];
+              const finalMatch = finalRound.matches.find(m => !m.isThirdPlaceMatch);
+              const thirdPlaceMatch = finalRound.matches.find(m => m.isThirdPlaceMatch);
+              
+              // Tournament is complete if:
+              // 1. Final match is completed
+              // 2. If 3rd place match exists, it must also be completed
+              const finalComplete = finalMatch && finalMatch.status === 'completed';
+              const thirdPlaceComplete = !thirdPlaceMatch || thirdPlaceMatch.status === 'completed';
+              
+              if (finalComplete && thirdPlaceComplete) {
+                updatedTournament.status = 'completed';
               }
             }
           } else {
@@ -154,6 +209,25 @@ function tournamentReducer(state, action) {
         
         // Update group standings with tournament settings
         updateGroupStandings(group, updatedTournament);
+        
+        // Check if all group matches are completed (for tournaments without playoffs)
+        const allGroupMatchesComplete = updatedTournament.groups?.every(g => 
+          g.matches?.every(m => m.status === 'completed')
+        );
+        
+        // If all group matches are complete and playoffs are not enabled or not started, mark tournament as completed
+        if (allGroupMatchesComplete) {
+          const playoffsEnabled = updatedTournament.playoffSettings?.enabled;
+          const hasPlayoffs = updatedTournament.playoffs && updatedTournament.playoffs.rounds && updatedTournament.playoffs.rounds.length > 0;
+          
+          // Tournament is complete if:
+          // 1. Playoffs are not enabled, OR
+          // 2. Playoffs are enabled but not started (no rounds), OR
+          // 3. Playoffs are enabled and all playoff matches are complete (handled in playoff section above)
+          if (!playoffsEnabled || !hasPlayoffs) {
+            updatedTournament.status = 'completed';
+          }
+        }
       }
       
       // Update tournament in tournaments array
@@ -423,24 +497,33 @@ export function TournamentProvider({ children }) {
     // Update local state first
     dispatch({ type: ACTIONS.COMPLETE_MATCH, payload: matchResult });
     
-    // If this is a playoff match, save updated playoff rounds to database
+    // Save tournament updates to database after state is updated
     // Use setTimeout to ensure state is updated after dispatch
-    if (matchResult.isPlayoff) {
-      setTimeout(async () => {
-        try {
-          // Get the updated tournament from state after dispatch
-          const currentState = state;
-          if (currentState.currentTournament?.playoffs) {
+    setTimeout(async () => {
+      try {
+        // Get the updated tournament from state after dispatch
+        const currentState = state;
+        if (currentState.currentTournament) {
+          // If this is a playoff match, save updated playoff rounds
+          if (matchResult.isPlayoff && currentState.currentTournament.playoffs) {
             await tournamentService.updateTournamentPlayoffs(
               currentState.currentTournament.id,
               currentState.currentTournament.playoffs
             );
           }
-        } catch (error) {
-          console.error('Error updating playoff rounds in database:', error);
+          
+          // If tournament is completed, update status in database
+          if (currentState.currentTournament.status === 'completed') {
+            await tournamentService.updateTournamentStatus(
+              currentState.currentTournament.id,
+              'completed'
+            );
+          }
         }
-      }, 200);
-    }
+      } catch (error) {
+        console.error('Error updating tournament in database:', error);
+      }
+    }, 200);
   };
 
   const deleteTournament = async (tournamentId) => {
@@ -494,6 +577,19 @@ export function TournamentProvider({ children }) {
     }
   };
 
+  const removePlayerFromTournament = async (playerId) => {
+    try {
+      await tournamentService.removePlayerFromTournament(state.currentTournament.id, playerId);
+      // Refresh tournament data to get updated player list
+      const updatedTournament = await tournamentService.getTournament(state.currentTournament.id);
+      dispatch({ type: ACTIONS.SELECT_TOURNAMENT, payload: updatedTournament });
+      return true;
+    } catch (error) {
+      console.error('Error removing player from tournament:', error);
+      throw error;
+    }
+  };
+
   const getTournament = async (tournamentId) => {
     try {
       const tournament = await tournamentService.getTournament(tournamentId);
@@ -530,6 +626,7 @@ export function TournamentProvider({ children }) {
     startPlayoffs,
     startTournament,
     addPlayerToTournament,
+    removePlayerFromTournament,
     updateTournamentSettings
   };
 

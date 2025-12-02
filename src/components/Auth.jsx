@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, User, Trophy } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function Auth() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -40,6 +42,9 @@ export function Auth() {
         const { error } = await signIn(formData.email, formData.password);
         if (error) {
           setError(error.message);
+        } else {
+          // Redirect to dashboard after successful login
+          navigate('/');
         }
       } else {
         if (formData.password !== formData.confirmPassword) {

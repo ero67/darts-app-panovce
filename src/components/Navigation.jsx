@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Trophy, Users, Target, Settings, LogOut, User, Menu, X, Activity } from 'lucide-react';
+import { Home, Trophy, Users, Target, Settings, LogOut, User, Menu, X, Moon, Sun } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 export function Navigation({ currentView, onViewChange, tournament, isMobileOpen, onMobileClose }) {
   const { user, signOut } = useAuth();
   const { t } = useLanguage();
+  const { isDarkMode, toggleTheme } = useTheme();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -24,7 +26,6 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
   const navItems = [
     { id: '/', label: t('navigation.dashboard'), icon: Home },
     { id: '/tournaments', label: t('navigation.tournaments'), icon: Trophy },
-    { id: '/live-matches', label: t('navigation.liveMatches'), icon: Activity },
     // { id: '/players', label: t('navigation.players'), icon: Users },
     // { id: '/settings', label: t('navigation.settings'), icon: Settings }
   ];
@@ -117,6 +118,15 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
             </div>
             
             <button 
+              className="theme-toggle-btn" 
+              onClick={toggleTheme}
+              title={isCollapsed ? (isDarkMode ? t('navigation.lightMode') : t('navigation.darkMode')) : ''}
+            >
+              {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+              {(!isCollapsed || isMobile) && <span>{isDarkMode ? t('navigation.lightMode') : t('navigation.darkMode')}</span>}
+            </button>
+            
+            <button 
               className="logout-btn" 
               onClick={handleSignOut}
               title={isCollapsed ? t('navigation.logout') : ''}
@@ -130,6 +140,15 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
             <div className="language-section">
               <LanguageSwitcher />
             </div>
+            
+            <button 
+              className="theme-toggle-btn" 
+              onClick={toggleTheme}
+              title={isCollapsed ? (isDarkMode ? t('navigation.lightMode') : t('navigation.darkMode')) : ''}
+            >
+              {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+              {(!isCollapsed || isMobile) && <span>{isDarkMode ? t('navigation.lightMode') : t('navigation.darkMode')}</span>}
+            </button>
             
             <button 
               className="login-btn" 

@@ -1093,6 +1093,39 @@ export const tournamentService = {
     }
   },
 
+  // Remove player from tournament
+  async removePlayerFromTournament(tournamentId, playerId) {
+    try {
+      
+      // Check if tournament is still open for registration
+      const { data: tournament, error: tournamentError } = await supabase
+        .from('tournaments')
+        .select('status')
+        .eq('id', tournamentId)
+        .single();
+
+      if (tournamentError) throw tournamentError;
+      if (tournament.status !== 'open_for_registration') {
+        throw new Error('Tournament is no longer accepting player changes');
+      }
+
+      // Remove player from tournament
+      const { error: deleteError } = await supabase
+        .from('tournament_players')
+        .delete()
+        .eq('tournament_id', tournamentId)
+        .eq('player_id', playerId);
+
+      if (deleteError) throw deleteError;
+
+      return true;
+
+    } catch (error) {
+      console.error('Error removing player from tournament:', error);
+      throw error;
+    }
+  },
+
   // Update tournament
   async updateTournament(tournamentId, updates) {
     try {
@@ -1118,17 +1151,61 @@ export const tournamentService = {
   // Delete tournament
   async deleteTournament(tournamentId) {
     try {
+      // First, get the tournament to extract playoff match IDs
+      const { data: tournament, error: fetchError } = await supabase
+        .from('tournaments')
+        .select('id, playoffs')
+        .eq('id', tournamentId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Extract playoff match IDs from the tournament's playoff bracket
+      // Playoff matches don't have a tournament_id foreign key, so we need to delete them explicitly
+      const playoffMatchIds = [];
+      if (tournament?.playoffs?.rounds) {
+        tournament.playoffs.rounds.forEach(round => {
+          if (round.matches) {
+            round.matches.forEach(match => {
+              if (match.id) {
+                playoffMatchIds.push(match.id);
+              }
+            });
+          }
+        });
+      }
+
+      // Delete playoff matches explicitly before deleting tournament
+      // (Group matches will be deleted via CASCADE when groups are deleted)
+      if (playoffMatchIds.length > 0) {
+        const { error: deletePlayoffMatchesError } = await supabase
+          .from('matches')
+          .delete()
+          .in('id', playoffMatchIds);
+
+        if (deletePlayoffMatchesError) {
+          console.error('Error deleting playoff matches:', deletePlayoffMatchesError);
+          // Continue with tournament deletion even if playoff match deletion fails
+        }
+      }
+
+      // Delete the tournament (CASCADE will automatically delete:
+      // - groups (which will CASCADE delete group matches)
+      // - tournament_players
+      // - tournament_stats
+      // - group_standings
+      // etc.)
       const { error } = await supabase
         .from('tournaments')
         .delete()
-        .eq('id', tournamentId)
+        .eq('id', tournamentId);
 
-      if (error) throw error
-      return true
+      if (error) throw error;
+      return true;
 
     } catch (error) {
-      console.error('Error deleting tournament:', error)
-      throw error
+      console.error('Error deleting tournament:', error);
+      throw error;
     }
   },
 
@@ -1156,6 +1233,31 @@ export const tournamentService = {
       return data;
     } catch (error) {
       console.error('Error updating tournament playoffs:', error);
+      throw error;
+    }
+  },
+
+  // Update tournament status
+  async updateTournamentStatus(tournamentId, status) {
+    try {
+      const { data, error } = await supabase
+        .from('tournaments')
+        .update({ 
+          status: status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', tournamentId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error updating tournament status:', error);
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error updating tournament status:', error);
       throw error;
     }
   },

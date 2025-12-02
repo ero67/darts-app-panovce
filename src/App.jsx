@@ -6,6 +6,7 @@ import { LiveMatchProvider } from './contexts/LiveMatchContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdminProvider } from './contexts/AdminContext';
 import { LanguageProvider } from './contexts/LanguageContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
 import { TournamentsList } from './components/TournamentsList';
@@ -14,7 +15,6 @@ import { TournamentManagement } from './components/TournamentManagement';
 import { TournamentRegistration } from './components/TournamentRegistration';
 import { MatchInterface } from './components/MatchInterface';
 import { Auth } from './components/Auth';
-import LiveMatchesDashboard from './components/LiveMatchesDashboard';
 import './App.css';
 
 function AppContent() {
@@ -264,7 +264,6 @@ function AppContent() {
               onDeleteTournament={handleDeleteTournament}
             />
           } />
-          <Route path="/live-matches" element={<LiveMatchesDashboard />} />
           <Route path="/login" element={<Auth />} />
           <Route path="/create-tournament" element={
             user ? (
@@ -287,17 +286,19 @@ function AppContent() {
 function App() {
   return (
     <Router>
-      <LanguageProvider>
-        <AuthProvider>
-          <AdminProvider>
-            <TournamentProvider>
-              <LiveMatchProvider>
-                <AppContent />
-              </LiveMatchProvider>
-            </TournamentProvider>
-          </AdminProvider>
-        </AuthProvider>
-      </LanguageProvider>
+      <ThemeProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <AdminProvider>
+              <TournamentProvider>
+                <LiveMatchProvider>
+                  <AppContent />
+                </LiveMatchProvider>
+              </TournamentProvider>
+            </AdminProvider>
+          </AuthProvider>
+        </LanguageProvider>
+      </ThemeProvider>
     </Router>
   );
 }

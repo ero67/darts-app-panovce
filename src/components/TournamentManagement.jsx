@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings, Edit2, ChevronUp, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings, Edit2, ChevronUp, ChevronDown, Clock, Activity, BarChart3, X, Search } from 'lucide-react';
 import { useLiveMatch } from '../contexts/LiveMatchContext';
 import { useAdmin } from '../contexts/AdminContext';
 import { useTournament } from '../contexts/TournamentContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
   // Generate unique ID for playoff matches (using crypto.randomUUID for proper UUIDs)
   const generateId = () => {
@@ -14,9 +16,66 @@ import { useAuth } from '../contexts/AuthContext';
 export function TournamentManagement({ tournament, onMatchStart, onBack, onDeleteTournament }) {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('groups'); // 'groups', 'matches', 'standings', 'playoffs', 'statistics'
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Valid tabs
+  const validTabs = ['groups', 'matches', 'standings', 'playoffs', 'statistics', 'liveMatches'];
+  
+  // Initialize activeTab from URL or default to 'groups'
+  const getInitialTab = () => {
+    const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl && validTabs.includes(tabFromUrl)) {
+      return tabFromUrl;
+    }
+    return 'groups';
+  };
+  
+  const [activeTab, setActiveTab] = useState(() => getInitialTab());
   const [showEditSettings, setShowEditSettings] = useState(false);
   const [editingMatch, setEditingMatch] = useState(null); // Match being edited
+  const [liveMatches, setLiveMatches] = useState([]);
+  const [matchStatistics, setMatchStatistics] = useState(null); // Match to show statistics for
+  const liveMatchesRef = useRef([]); // Keep a ref to prevent flickering
+  const modalOpenRef = useRef(false); // Track if any modal is open
+  const activeTabRef = useRef(activeTab); // Track active tab for interval callback
+  const [matchGroupFilter, setMatchGroupFilter] = useState('all'); // Filter by group
+  const [matchPlayerFilter, setMatchPlayerFilter] = useState(''); // Filter by player name
+  
+  // Update URL when tab changes
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    activeTabRef.current = tab; // Update ref immediately
+    setSearchParams({ tab });
+  };
+  
+  // Sync activeTab with URL on mount and when URL changes (but not when we programmatically change it)
+  useEffect(() => {
+    const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl && validTabs.includes(tabFromUrl) && tabFromUrl !== activeTab) {
+      setActiveTab(tabFromUrl);
+      activeTabRef.current = tabFromUrl; // Update ref
+    } else if (!tabFromUrl && activeTab !== 'groups') {
+      // If no tab in URL and we're not on default, update URL
+      setSearchParams({ tab: activeTab }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Keep ref in sync with activeTab state
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+  
+  // Sync ref with state whenever state changes
+  useEffect(() => {
+    liveMatchesRef.current = liveMatches;
+  }, [liveMatches]);
+  
+  // Track modal state in ref so interval callback can check it
+  useEffect(() => {
+    modalOpenRef.current = showEditSettings || !!editingMatch || !!matchStatistics;
+  }, [showEditSettings, editingMatch, matchStatistics]);
+  
   const [tournamentSettings, setTournamentSettings] = useState({
     legsToWin: tournament.legsToWin || 3,
     startingScore: tournament.startingScore || 501,
@@ -56,6 +115,8 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     })()
   });
   const { isMatchLive, isMatchLiveOnThisDevice, isMatchStartedByCurrentUser, getLiveMatchInfo } = useLiveMatch();
+  const { isAdmin, isAdminMode } = useAdmin();
+  const { startPlayoffs: contextStartPlayoffs, updateTournamentSettings, getTournament } = useTournament();
 
   // Update tournamentSettings when tournament prop changes (e.g., after reload from DB)
   useEffect(() => {
@@ -101,6 +162,66 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     }
   }, [tournament?.id, tournament?.standingsCriteriaOrder, tournament?.playoffSettings]);
 
+  // Auto-refresh tournament data when there are live matches
+  // Only refresh when the live matches tab is active to avoid interfering with other tabs (e.g., filters)
+  useEffect(() => {
+    // Only run auto-refresh when live matches tab is active
+    if (activeTab !== 'liveMatches') {
+      return;
+    }
+
+    if (!tournament?.id || !getTournament) {
+      return;
+    }
+
+    // Check if there are any live matches (status === 'in_progress')
+    const checkHasLiveMatches = (currentTournament) => {
+      if (!currentTournament) return false;
+      
+      // Check group matches
+      const groupMatches = currentTournament?.groups?.flatMap(g => g.matches || []) || [];
+      const hasLiveGroupMatch = groupMatches.some(m => m.status === 'in_progress');
+      
+      // Check playoff matches
+      const playoffMatches = currentTournament?.playoffMatches || [];
+      const hasLivePlayoffMatch = playoffMatches.some(m => m.status === 'in_progress');
+      
+      return hasLiveGroupMatch || hasLivePlayoffMatch;
+    };
+
+    if (!checkHasLiveMatches(tournament)) {
+      return; // No live matches, don't set up polling
+    }
+
+    // Set up interval to refresh tournament every 8 seconds
+    const refreshInterval = setInterval(async () => {
+      try {
+        // Skip refresh if any modals are open to prevent them from closing
+        if (modalOpenRef.current) {
+          return;
+        }
+        
+        // Double-check we're still on the live matches tab before refreshing
+        // This prevents refreshing when user switches tabs
+        // Use ref to get current value (not stale closure)
+        if (activeTabRef.current !== 'liveMatches') {
+          return;
+        }
+        
+        const refreshedTournament = await getTournament(tournament.id);
+        // Check if there are still live matches after refresh
+        // If not, the interval will be cleaned up on next render
+      } catch (error) {
+        console.error('Error refreshing tournament for live matches:', error);
+      }
+    }, 8000); // 8 seconds
+
+    // Cleanup interval on unmount or when tournament changes
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [activeTab, tournament?.id, tournament?.groups, tournament?.playoffMatches, getTournament]);
+
   // Simple function to check if match exists in localStorage (started on this device)
   const isMatchInLocalStorage = (matchId) => {
     const savedState = localStorage.getItem(`match-state-${matchId}`);
@@ -139,8 +260,6 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     
     return false;
   };
-  const { isAdmin, isAdminMode } = useAdmin();
-  const { startPlayoffs: contextStartPlayoffs, updateTournamentSettings } = useTournament();
 
   // Get legs to win for a specific playoff round based on number of players in that round
   const getPlayoffLegsToWin = (roundSize) => {
@@ -202,6 +321,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     const rounds = [];
     let currentRoundSize = totalQualifiers;
     let roundNumber = 1;
+    let hasThirdPlaceMatch = false;
 
     // Generate rounds from first round to final
     while (currentRoundSize > 1) {
@@ -227,8 +347,32 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       }
 
       rounds.push(round);
+      
+      // If we're at semifinals (4 players), add 3rd place match to the final round
+      if (currentRoundSize === 4 && !hasThirdPlaceMatch) {
+        hasThirdPlaceMatch = true;
+        // Add 3rd place match to the final round (which will be created next iteration)
+        // We'll add it after the final round is created
+      }
+      
       currentRoundSize = currentRoundSize / 2;
       roundNumber++;
+    }
+
+    // Add 3rd place match if we had semifinals (4 qualifiers)
+    if (totalQualifiers === 4 && rounds.length >= 2) {
+      const finalRound = rounds[rounds.length - 1];
+      finalRound.matches.push({
+        id: generateId(),
+        player1: null,
+        player2: null,
+        status: 'pending',
+        result: null,
+        isPlayoff: true,
+        playoffRound: roundNumber - 1,
+        playoffMatchNumber: finalRound.matches.length + 1,
+        isThirdPlaceMatch: true
+      });
     }
 
     return rounds;
@@ -358,7 +502,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       case 2: return t('management.final');
       case 4: return t('management.semiFinals');
       case 8: return t('management.quarterFinals');
-      case 16: return t('management.roundOf', { count: 16 });
+      case 16: return t('management.top16');
       case 32: return t('management.roundOf', { count: 32 });
       case 64: return t('management.roundOf', { count: 64 });
       default: return t('management.roundOf', { count: roundSize });
@@ -484,15 +628,95 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     </div>
   );
 
-  const renderMatches = () => (
-    <div className="matches-view">
-      <h3>{t('management.allMatches')}</h3>
-      <div className="matches-list">
-        {tournament.groups && tournament.groups.length > 0 ? tournament.groups.map(group => (
-          <div key={group.id} className="group-matches">
-            <h4>{group.name}</h4>
-            <div className="matches-grid">
-              {group.matches.map(match => {
+  const renderMatches = () => {
+    // Collect all matches from all groups
+    const allMatches = tournament.groups?.flatMap(group => 
+      group.matches.map(match => ({ ...match, groupId: group.id, groupName: group.name }))
+    ) || [];
+
+    // Filter matches
+    const filteredMatches = allMatches.filter(match => {
+      // Filter by group
+      if (matchGroupFilter !== 'all' && match.groupId !== matchGroupFilter) {
+        return false;
+      }
+
+      // Filter by player name
+      if (matchPlayerFilter.trim()) {
+        const searchTerm = matchPlayerFilter.trim().toLowerCase();
+        const player1Name = (match.player1?.name || '').toLowerCase();
+        const player2Name = (match.player2?.name || '').toLowerCase();
+        if (!player1Name.includes(searchTerm) && !player2Name.includes(searchTerm)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Group filtered matches by group
+    const matchesByGroup = filteredMatches.reduce((acc, match) => {
+      if (!acc[match.groupId]) {
+        acc[match.groupId] = {
+          groupId: match.groupId,
+          groupName: match.groupName,
+          matches: []
+        };
+      }
+      acc[match.groupId].matches.push(match);
+      return acc;
+    }, {});
+
+    return (
+      <div className="matches-view">
+        <div className="matches-header">
+          <h3>{t('management.allMatches')}</h3>
+          <div className="matches-filters">
+            <div className="filter-group">
+              <label htmlFor="group-filter">{t('management.filterByGroup') || 'Filter by Group'}:</label>
+              <select
+                id="group-filter"
+                className="filter-select"
+                value={matchGroupFilter}
+                onChange={(e) => setMatchGroupFilter(e.target.value)}
+              >
+                <option value="all">{t('management.allGroups') || 'All Groups'}</option>
+                {tournament.groups?.map(group => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="filter-group">
+              <label htmlFor="player-filter">{t('management.filterByPlayer') || 'Filter by Player'}:</label>
+              <div className="filter-input-wrapper">
+                <Search size={16} className="filter-icon" />
+                <input
+                  id="player-filter"
+                  type="text"
+                  className="filter-input"
+                  placeholder={t('management.searchPlayerName') || 'Search player name...'}
+                  value={matchPlayerFilter}
+                  onChange={(e) => setMatchPlayerFilter(e.target.value)}
+                />
+                {matchPlayerFilter && (
+                  <button
+                    className="filter-clear-btn"
+                    onClick={() => setMatchPlayerFilter('')}
+                    title={t('management.clearFilter') || 'Clear filter'}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="matches-list">
+          {Object.keys(matchesByGroup).length > 0 ? Object.values(matchesByGroup).map(groupData => (
+            <div key={groupData.groupId} className="group-matches">
+              <h4>{groupData.groupName}</h4>
+              <div className="matches-grid">
+                {groupData.matches.map(match => {
                 const isPlayer1Winner = match.status === 'completed' && match.result && match.result.winner === match.player1?.id;
                 const isPlayer2Winner = match.status === 'completed' && match.result && match.result.winner === match.player2?.id;
                 
@@ -516,6 +740,15 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                         </div>
                       )}
                     </div>
+                    {match.status === 'completed' && match.result && (
+                      <button
+                        className="view-statistics-btn"
+                        onClick={() => setMatchStatistics(match)}
+                        title={t('management.viewStatistics') || 'View Statistics'}
+                      >
+                        <BarChart3 size={16} />
+                      </button>
+                    )}
                   </div>
                   {match.status === 'completed' && match.result ? (
                     <div className="match-result-compact">
@@ -556,7 +789,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                         className="start-match-btn"
                         onClick={() => onMatchStart({ 
                           ...match,
-                          groupId: group.id,
+                          groupId: match.groupId,
                           legsToWin: match.legsToWin || tournament.legsToWin,
                           startingScore: match.startingScore || tournament.startingScore
                         })}
@@ -618,12 +851,16 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           </div>
         )) : (
           <div className="no-matches">
-            <p>{t('management.noGroupsYet') || 'No groups created yet. Start the tournament to create groups.'}</p>
+            <p>{matchGroupFilter !== 'all' || matchPlayerFilter ? 
+              (t('management.noMatchesFound') || 'No matches found matching the filters.') :
+              (t('management.noMatchesYet') || 'No matches created yet.')
+            }</p>
           </div>
         )}
       </div>
     </div>
-  );
+    );
+  };
 
   const renderStandings = () => (
     <div className="standings-view">
@@ -731,107 +968,121 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       return true;
     };
 
+    // Helper function to process a match and collect statistics
+    const processMatch = (match) => {
+      if (match.status !== 'completed' || !match.result) {
+        return;
+      }
+
+      // Debug: Log match result structure
+      if (match.id && (!match.result.player1Stats?.checkouts || !match.result.player2Stats?.checkouts)) {
+        console.log('Match result structure for match', match.id, ':', {
+          hasPlayer1Stats: !!match.result.player1Stats,
+          hasPlayer1Checkouts: !!match.result.player1Stats?.checkouts,
+          player1CheckoutsCount: match.result.player1Stats?.checkouts?.length || 0,
+          hasPlayer1LegAverages: !!match.result.player1Stats?.legAverages,
+          player1LegAveragesCount: match.result.player1Stats?.legAverages?.length || 0,
+          hasPlayer2Stats: !!match.result.player2Stats,
+          hasPlayer2Checkouts: !!match.result.player2Stats?.checkouts,
+          player2CheckoutsCount: match.result.player2Stats?.checkouts?.length || 0,
+          hasPlayer2LegAverages: !!match.result.player2Stats?.legAverages,
+          player2LegAveragesCount: match.result.player2Stats?.legAverages?.length || 0
+        });
+      }
+      
+      // Best averages
+      if (match.result.player1Stats?.average) {
+        allAverages.push({
+          player: match.player1,
+          average: match.result.player1Stats.average,
+          matchId: match.id,
+          opponent: match.player2?.name || 'Unknown'
+        });
+      }
+      if (match.result.player2Stats?.average) {
+        allAverages.push({
+          player: match.player2,
+          average: match.result.player2Stats.average,
+          matchId: match.id,
+          opponent: match.player1?.name || 'Unknown'
+        });
+      }
+
+      // Best checkouts
+      const addCheckoutEntries = (playerStats, player, opponent) => {
+        if (!playerStats?.checkouts?.length) {
+          return;
+        }
+        playerStats.checkouts.forEach(checkout => {
+          if (checkout?.checkout === null || checkout?.checkout === undefined) {
+            return;
+          }
+          // Checkout is now stored as a number, but handle legacy string format too
+          const checkoutValue = getCheckoutValue(checkout.checkout);
+          if (checkoutValue > 0) {
+            allCheckouts.push({
+              player,
+              checkout: checkoutValue,
+              leg: checkout.leg,
+              darts: checkout.totalDarts || checkout.darts,
+              matchId: match.id,
+              opponent: opponent?.name || 'Unknown'
+            });
+          }
+        });
+      };
+
+      addCheckoutEntries(match.result.player1Stats, match.player1, match.player2);
+      addCheckoutEntries(match.result.player2Stats, match.player2, match.player1);
+
+      const player1LegsAdded = collectLegs(match.result.player1Stats, match.player1, match.player2, match.id);
+      const player2LegsAdded = collectLegs(match.result.player2Stats, match.player2, match.player1, match.id);
+
+      if (!player1LegsAdded && !player2LegsAdded) {
+        // Fallback for legacy data without legs array
+        const fallbackFromCheckouts = (playerStats, player, opponent) => {
+          if (!playerStats?.checkouts?.length) return;
+          playerStats.checkouts.forEach(checkout => {
+            if (!checkout?.checkout) return;
+            const startingScore = match.startingScore || 501;
+            let totalDarts = checkout.totalDarts || checkout.darts;
+            if ((!totalDarts || totalDarts <= 3) && playerStats.legAverages?.length >= checkout.leg) {
+              const legAverage = playerStats.legAverages[checkout.leg - 1];
+              if (legAverage > 0) {
+                totalDarts = Math.round((startingScore / legAverage) * 3);
+              }
+            }
+            if (!totalDarts) return;
+            allLegs.push({
+              player,
+              darts: totalDarts,
+              leg: checkout.leg,
+              checkout: checkout.checkout,
+              matchId: match.id,
+              opponent: opponent?.name || 'Unknown'
+            });
+          });
+        };
+        fallbackFromCheckouts(match.result.player1Stats, match.player1, match.player2);
+        fallbackFromCheckouts(match.result.player2Stats, match.player2, match.player1);
+      }
+    };
+
     // Iterate through all groups and matches
     if (tournament.groups) {
       tournament.groups.forEach(group => {
         if (group.matches) {
           group.matches.forEach(match => {
-            if (match.status === 'completed' && match.result) {
-              // Debug: Log match result structure
-              if (match.id && (!match.result.player1Stats?.checkouts || !match.result.player2Stats?.checkouts)) {
-                console.log('Match result structure for match', match.id, ':', {
-                  hasPlayer1Stats: !!match.result.player1Stats,
-                  hasPlayer1Checkouts: !!match.result.player1Stats?.checkouts,
-                  player1CheckoutsCount: match.result.player1Stats?.checkouts?.length || 0,
-                  hasPlayer1LegAverages: !!match.result.player1Stats?.legAverages,
-                  player1LegAveragesCount: match.result.player1Stats?.legAverages?.length || 0,
-                  hasPlayer2Stats: !!match.result.player2Stats,
-                  hasPlayer2Checkouts: !!match.result.player2Stats?.checkouts,
-                  player2CheckoutsCount: match.result.player2Stats?.checkouts?.length || 0,
-                  hasPlayer2LegAverages: !!match.result.player2Stats?.legAverages,
-                  player2LegAveragesCount: match.result.player2Stats?.legAverages?.length || 0
-                });
-              }
-              
-              // Best averages
-              if (match.result.player1Stats?.average) {
-                allAverages.push({
-                  player: match.player1,
-                  average: match.result.player1Stats.average,
-                  matchId: match.id,
-                  opponent: match.player2?.name || 'Unknown'
-                });
-              }
-              if (match.result.player2Stats?.average) {
-                allAverages.push({
-                  player: match.player2,
-                  average: match.result.player2Stats.average,
-                  matchId: match.id,
-                  opponent: match.player1?.name || 'Unknown'
-                });
-              }
-
-              // Best checkouts
-              const addCheckoutEntries = (playerStats, player, opponent) => {
-                if (!playerStats?.checkouts?.length) {
-                  return;
-                }
-                playerStats.checkouts.forEach(checkout => {
-                  if (checkout?.checkout === null || checkout?.checkout === undefined) {
-                    return;
-                  }
-                  // Checkout is now stored as a number, but handle legacy string format too
-                  const checkoutValue = getCheckoutValue(checkout.checkout);
-                  if (checkoutValue > 0) {
-                    allCheckouts.push({
-                      player,
-                      checkout: checkoutValue,
-                      leg: checkout.leg,
-                      darts: checkout.totalDarts || checkout.darts,
-                      matchId: match.id,
-                      opponent: opponent?.name || 'Unknown'
-                    });
-                  }
-                });
-              };
-
-              addCheckoutEntries(match.result.player1Stats, match.player1, match.player2);
-              addCheckoutEntries(match.result.player2Stats, match.player2, match.player1);
-
-              const player1LegsAdded = collectLegs(match.result.player1Stats, match.player1, match.player2, match.id);
-              const player2LegsAdded = collectLegs(match.result.player2Stats, match.player2, match.player1, match.id);
-
-              if (!player1LegsAdded && !player2LegsAdded) {
-                // Fallback for legacy data without legs array
-                const fallbackFromCheckouts = (playerStats, player, opponent) => {
-                  if (!playerStats?.checkouts?.length) return;
-                  playerStats.checkouts.forEach(checkout => {
-                    if (!checkout?.checkout) return;
-                    const startingScore = match.startingScore || 501;
-                    let totalDarts = checkout.totalDarts || checkout.darts;
-                    if ((!totalDarts || totalDarts <= 3) && playerStats.legAverages?.length >= checkout.leg) {
-                      const legAverage = playerStats.legAverages[checkout.leg - 1];
-                      if (legAverage > 0) {
-                        totalDarts = Math.round((startingScore / legAverage) * 3);
-                      }
-                    }
-                    if (!totalDarts) return;
-                    allLegs.push({
-                      player,
-                      darts: totalDarts,
-                      leg: checkout.leg,
-                      checkout: checkout.checkout,
-                      matchId: match.id,
-                      opponent: opponent?.name || 'Unknown'
-                    });
-                  });
-                };
-                fallbackFromCheckouts(match.result.player1Stats, match.player1, match.player2);
-                fallbackFromCheckouts(match.result.player2Stats, match.player2, match.player1);
-              }
-            }
+            processMatch(match);
           });
         }
+      });
+    }
+
+    // Iterate through playoff matches
+    if (tournament.playoffMatches) {
+      tournament.playoffMatches.forEach(match => {
+        processMatch(match);
       });
     }
 
@@ -850,8 +1101,53 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       .sort((a, b) => b.average - a.average)
       .slice(0, 10);
     
-    const bestCheckouts = [...allCheckouts].sort((a, b) => b.checkout - a.checkout).slice(0, 10);
-    const fewestDarts = [...allLegs].sort((a, b) => a.darts - b.darts).slice(0, 10);
+    // For checkouts: group by player and collect all checkouts above 50
+    const playerCheckouts = new Map();
+    allCheckouts.forEach(entry => {
+      const playerId = entry.player?.id;
+      if (!playerId) return;
+      const checkoutValue = entry.checkout;
+      if (checkoutValue > 50) {
+        if (!playerCheckouts.has(playerId)) {
+          playerCheckouts.set(playerId, {
+            player: entry.player,
+            checkouts: []
+          });
+        }
+        const playerData = playerCheckouts.get(playerId);
+        // Only add unique checkouts (avoid duplicates)
+        if (!playerData.checkouts.includes(checkoutValue)) {
+          playerData.checkouts.push(checkoutValue);
+        }
+      }
+    });
+    // Sort checkouts for each player in descending order
+    playerCheckouts.forEach((playerData) => {
+      playerData.checkouts.sort((a, b) => b - a);
+    });
+    const bestCheckouts = Array.from(playerCheckouts.values())
+      .sort((a, b) => {
+        // Sort by highest checkout first, then by number of checkouts
+        const maxA = Math.max(...a.checkouts);
+        const maxB = Math.max(...b.checkouts);
+        if (maxB !== maxA) return maxB - maxA;
+        return b.checkouts.length - a.checkouts.length;
+      })
+      .slice(0, 10);
+
+    // For fewest darts: group by player and take only the best (fewest darts) for each player
+    const playerBestLegs = new Map();
+    allLegs.forEach(entry => {
+      const playerId = entry.player?.id;
+      if (!playerId) return;
+      const existing = playerBestLegs.get(playerId);
+      if (!existing || entry.darts < existing.darts) {
+        playerBestLegs.set(playerId, entry);
+      }
+    });
+    const fewestDarts = Array.from(playerBestLegs.values())
+      .sort((a, b) => a.darts - b.darts)
+      .slice(0, 10);
 
     return (
       <div className="statistics-view">
@@ -891,14 +1187,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                 <span>#</span>
                 <span>{t('management.player')}</span>
                 <span>{t('management.checkout') || 'Checkout'}</span>
-                <span>{t('management.opponent') || 'Opponent'}</span>
               </div>
               {bestCheckouts.map((entry, index) => (
                 <div key={`checkout-${index}`} className="leaderboard-row">
                   <span className={`position ${index === 0 ? 'first' : index === 1 ? 'second' : index === 2 ? 'third' : ''}`}>{index + 1}</span>
                   <span className="player-name">{entry.player?.name || 'Unknown'}</span>
-                  <span className="value">{entry.checkout}</span>
-                  <span className="opponent">{entry.opponent}</span>
+                  <span className="value">{entry.checkouts.join(', ')}</span>
                 </div>
               ))}
             </div>
@@ -931,6 +1225,324 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             <p className="no-stats">{t('management.noStatisticsYet') || 'No statistics available yet.'}</p>
           )}
         </div>
+      </div>
+    );
+  };
+
+  // Load and subscribe to live matches for this tournament
+  useEffect(() => {
+    if (!tournament?.id) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadLiveMatches = async () => {
+      try {
+        // Get all group IDs for this tournament
+        const groupIds = tournament.groups?.map(g => g.id) || [];
+        
+        // Get playoff matches for this tournament
+        const playoffMatchIds = tournament.playoffMatches?.map(m => m.id) || [];
+        
+        const allLiveMatches = [];
+
+        // Load group matches if we have groups
+        if (groupIds.length > 0) {
+          const groupQuery = supabase
+            .from('matches')
+            .select(`
+              *,
+              player1:players!matches_player1_id_fkey(*),
+              player2:players!matches_player2_id_fkey(*),
+              group:groups(
+                *,
+                tournament:tournaments(*)
+              )
+            `)
+            .eq('status', 'in_progress')
+            .in('group_id', groupIds);
+
+          const { data: groupData, error: groupError } = await groupQuery;
+          if (!groupError && groupData) {
+            allLiveMatches.push(...groupData);
+          }
+        }
+
+        // Load playoff matches if we have playoff matches
+        if (playoffMatchIds.length > 0) {
+          const playoffQuery = supabase
+            .from('matches')
+            .select(`
+              *,
+              player1:players!matches_player1_id_fkey(*),
+              player2:players!matches_player2_id_fkey(*)
+            `)
+            .eq('status', 'in_progress')
+            .in('id', playoffMatchIds);
+
+          const { data: playoffData, error: playoffError } = await playoffQuery;
+          if (!playoffError && playoffData) {
+            // Merge playoff matches, avoiding duplicates
+            const existingIds = new Set(allLiveMatches.map(m => m.id));
+            playoffData.forEach(match => {
+              if (!existingIds.has(match.id)) {
+                allLiveMatches.push(match);
+              }
+            });
+          }
+        }
+
+        // Sort by last activity
+        allLiveMatches.sort((a, b) => {
+          const timeA = new Date(a.last_activity_at || 0).getTime();
+          const timeB = new Date(b.last_activity_at || 0).getTime();
+          return timeB - timeA;
+        });
+
+        // Smart merge: preserve existing matches and only update changed ones
+        // This prevents cards from disappearing during refresh
+        setLiveMatches(prev => {
+          // Always use ref first to get the most current matches (prev might be stale in async context)
+          // This ensures we never lose existing matches during async operations
+          const currentMatches = liveMatchesRef.current.length > 0 ? liveMatchesRef.current : prev;
+          
+          // Create a map of new matches by ID for quick lookup
+          const newMatchesMap = new Map(allLiveMatches.map(m => [m.id, m]));
+          
+          // Start with existing matches, updating them if we have new data
+          // This ensures existing cards stay visible
+          const mergedMatches = currentMatches.map(existingMatch => {
+            const newMatch = newMatchesMap.get(existingMatch.id);
+            // If match is no longer in_progress, remove it
+            if (newMatch && newMatch.status !== 'in_progress') {
+              return null; // Mark for removal
+            }
+            // Return updated match if available, otherwise keep existing (preserves card)
+            return newMatch || existingMatch;
+          }).filter(m => m !== null && m.status === 'in_progress'); // Only keep live matches
+          
+          // Add any new matches that weren't in the previous list
+          const existingIds = new Set(currentMatches.map(m => m.id));
+          allLiveMatches.forEach(newMatch => {
+            if (!existingIds.has(newMatch.id) && newMatch.status === 'in_progress') {
+              mergedMatches.push(newMatch);
+            }
+          });
+          
+          // Sort the merged result
+          mergedMatches.sort((a, b) => {
+            const timeA = new Date(a.last_activity_at || 0).getTime();
+            const timeB = new Date(b.last_activity_at || 0).getTime();
+            return timeB - timeA;
+          });
+          
+          // Update ref with merged matches BEFORE returning
+          // This ensures next update has the latest data
+          liveMatchesRef.current = mergedMatches;
+          return mergedMatches;
+        });
+      } catch (err) {
+        console.error('Error loading live matches:', err);
+      }
+    };
+
+    // Load initial matches
+    loadLiveMatches();
+
+    // Set up real-time subscription
+    const channel = supabase
+      .channel(`live-matches-tournament-${tournament.id}`)
+      .on('postgres_changes', 
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'matches',
+          filter: 'status=eq.in_progress'
+        },
+        async (payload) => {
+          // Check if this match belongs to this tournament
+          const match = payload.new;
+          const belongsToTournament = 
+            (tournament.groups?.some(g => g.id === match.group_id)) ||
+            (tournament.playoffMatches?.some(m => m.id === match.id));
+
+          if (!belongsToTournament) {
+            return; // Not our tournament, ignore
+          }
+
+          // Reload the full match data
+          const { data: updatedMatch, error } = await supabase
+            .from('matches')
+            .select(`
+              *,
+              player1:players!matches_player1_id_fkey(*),
+              player2:players!matches_player2_id_fkey(*),
+              group:groups(
+                *,
+                tournament:tournaments(*)
+              )
+            `)
+            .eq('id', match.id)
+            .single();
+
+          if (!error && updatedMatch) {
+            if (updatedMatch.status === 'in_progress') {
+              setLiveMatches(prev => {
+                const currentMatches = liveMatchesRef.current.length > 0 ? liveMatchesRef.current : prev;
+                const existing = currentMatches.find(m => m.id === updatedMatch.id);
+                const updated = existing 
+                  ? currentMatches.map(m => m.id === updatedMatch.id ? updatedMatch : m)
+                  : [...currentMatches, updatedMatch];
+                liveMatchesRef.current = updated;
+                return updated;
+              });
+            } else {
+              // Match completed or status changed, remove from live matches
+              setLiveMatches(prev => {
+                const currentMatches = liveMatchesRef.current.length > 0 ? liveMatchesRef.current : prev;
+                const filtered = currentMatches.filter(m => m.id !== match.id);
+                liveMatchesRef.current = filtered;
+                return filtered;
+              });
+            }
+          }
+        }
+      )
+      .on('postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'matches',
+          filter: 'status=eq.in_progress'
+        },
+        async (payload) => {
+          const match = payload.new;
+          const belongsToTournament = 
+            (tournament.groups?.some(g => g.id === match.group_id)) ||
+            (tournament.playoffMatches?.some(m => m.id === match.id));
+
+          if (!belongsToTournament) {
+            return;
+          }
+
+          // Load full match data
+          const { data: newMatch, error } = await supabase
+            .from('matches')
+            .select(`
+              *,
+              player1:players!matches_player1_id_fkey(*),
+              player2:players!matches_player2_id_fkey(*),
+              group:groups(
+                *,
+                tournament:tournaments(*)
+              )
+            `)
+            .eq('id', match.id)
+            .single();
+
+          if (!error && newMatch) {
+            setLiveMatches(prev => {
+              const currentMatches = liveMatchesRef.current.length > 0 ? liveMatchesRef.current : prev;
+              if (currentMatches.find(m => m.id === newMatch.id)) {
+                return currentMatches;
+              }
+              const updated = [...currentMatches, newMatch];
+              liveMatchesRef.current = updated;
+              return updated;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [tournament?.id]); // Only depend on tournament ID to avoid unnecessary reloads
+
+  const renderLiveMatches = () => {
+    const formatTimeAgo = (timestamp) => {
+      if (!timestamp) return 'Unknown';
+      const now = new Date();
+      const time = new Date(timestamp);
+      const diffMs = now - time;
+      const diffMins = Math.floor(diffMs / 60000);
+      
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}d ago`;
+    };
+
+    return (
+      <div className="live-matches-view">
+        <div className="live-matches-header">
+          <h3>
+            <Activity size={20} />
+            {t('management.liveMatches') || 'Live Matches'}
+          </h3>
+          <p className="live-matches-count">
+            {liveMatches.length} match{liveMatches.length !== 1 ? 'es' : ''} currently in progress
+          </p>
+        </div>
+
+        {liveMatches.length === 0 ? (
+          <div className="no-live-matches">
+            <Activity size={48} className="no-matches-icon" />
+            <h4>{t('management.noLiveMatches') || 'No Live Matches'}</h4>
+            <p>{t('management.noLiveMatchesDescription') || 'There are no matches currently in progress for this tournament.'}</p>
+          </div>
+        ) : (
+          <div className="live-matches-grid">
+            {liveMatches.map(match => (
+              <div key={match.id} className="live-match-card scoreboard-style">
+                <div className="scoreboard-header">
+                  <div className="match-format">First to {match.legs_to_win || 3}</div>
+                  <div className="live-badge">
+                    <Activity size={12} />
+                    <span>LIVE</span>
+                  </div>
+                </div>
+                
+                <div className="scoreboard-content">
+                  <div className="scoreboard-row">
+                    <div className="scoreboard-label">Legs</div>
+                  </div>
+                  
+                  <div className="player-row player1-row">
+                    <div className="player-info">
+                      <div className="player-name-large">{match.player1?.name || 'Player 1'}</div>
+                    </div>
+                    <div className="scoreboard-scores">
+                      <div className="legs-score">{match.player1_legs || 0}</div>
+                      <div className="current-score-large">{match.player1_current_score || 501}</div>
+                    </div>
+                  </div>
+                  
+                  <div className="player-row player2-row">
+                    <div className="player-info">
+                      <div className="player-name-large">{match.player2?.name || 'Player 2'}</div>
+                    </div>
+                    <div className="scoreboard-scores">
+                      <div className="legs-score">{match.player2_legs || 0}</div>
+                      <div className="current-score-large">{match.player2_current_score || 501}</div>
+                    </div>
+                  </div>
+                </div>
+                
+                {match.group && (
+                  <div className="scoreboard-footer">
+                    <span className="group-name">{match.group.name || 'Group'}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -1123,7 +1735,10 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             <div key={round.id} className={`bracket-round ${index + 1 === currentRound ? 'current' : ''}`}>
               <div className="round-header">
                 <h4>{round.name}</h4>
-                <span className="match-count">{round.matches.length} matches</span>
+                <span className="match-count">
+                  {round.matches.filter(m => !m.isThirdPlaceMatch).length} {round.matches.filter(m => !m.isThirdPlaceMatch).length === 1 ? 'match' : 'matches'}
+                  {round.matches.some(m => m.isThirdPlaceMatch) && ' + 3rd Place'}
+                </span>
               </div>
               
               <div className="round-matches">
@@ -1131,7 +1746,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                   // Find the actual database match for this bracket match
                   const match = playoffMatches.find(pm => pm.id === bracketMatch.id) || bracketMatch;
                   return (
-                  <div key={match.id} className={`playoff-match ${match.status}`}>
+                  <div key={match.id} className={`playoff-match ${match.status} ${bracketMatch.isThirdPlaceMatch ? 'third-place-match' : ''}`}>
+                    {bracketMatch.isThirdPlaceMatch && (
+                      <div className="match-label">
+                        {t('management.thirdPlaceMatch') || '3rd Place Match'}
+                      </div>
+                    )}
                     <div className="match-header">
                       <div className="match-status">
                         <span 
@@ -1150,6 +1770,15 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                           </div>
                         )}
                       </div>
+                      {match.status === 'completed' && match.result && (
+                        <button
+                          className="view-statistics-btn"
+                          onClick={() => setMatchStatistics(match)}
+                          title={t('management.viewStatistics') || 'View Statistics'}
+                        >
+                          <BarChart3 size={16} />
+                        </button>
+                      )}
                     </div>
                     <div className="match-players">
                       <div className={`player ${match.result?.winner === match.player1?.id ? 'winner' : ''}`}>
@@ -1175,7 +1804,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                       {isAdmin && match.status === 'pending' && !isMatchActuallyLive(match.id) && (
                         <button 
                           className="edit-match-btn"
-                          onClick={() => setEditingMatch(match)}
+                          onClick={() => setEditingMatch({ ...match, isThirdPlaceMatch: bracketMatch.isThirdPlaceMatch })}
                           title={t('management.editMatchPlayers') || 'Edit match players'}
                         >
                           <Edit2 size={16} />
@@ -1264,12 +1893,6 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                           </button>
                         )
                       )}
-                      {match.status === 'completed' && (
-                        <div className="match-completed">
-                          <CheckCircle size={16} />
-                          Completed
-                        </div>
-                      )}
                     </div>
                   </div>
                   );
@@ -1329,35 +1952,42 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       <div className="management-tabs">
         <button 
           className={activeTab === 'groups' ? 'active' : ''}
-          onClick={() => setActiveTab('groups')}
+          onClick={() => handleTabChange('groups')}
         >
           {t('management.groups')}
         </button>
         <button 
           className={activeTab === 'matches' ? 'active' : ''}
-          onClick={() => setActiveTab('matches')}
+          onClick={() => handleTabChange('matches')}
         >
           {t('management.matches')}
         </button>
         <button 
           className={activeTab === 'standings' ? 'active' : ''}
-          onClick={() => setActiveTab('standings')}
+          onClick={() => handleTabChange('standings')}
         >
           {t('management.standings')}
         </button>
         {tournament.playoffSettings?.enabled && (
           <button 
             className={activeTab === 'playoffs' ? 'active' : ''}
-            onClick={() => setActiveTab('playoffs')}
+            onClick={() => handleTabChange('playoffs')}
           >
             {t('management.playoffs')}
           </button>
         )}
         <button 
           className={activeTab === 'statistics' ? 'active' : ''}
-          onClick={() => setActiveTab('statistics')}
+          onClick={() => handleTabChange('statistics')}
         >
           {t('management.statistics') || 'Statistics'}
+        </button>
+        <button 
+          className={activeTab === 'liveMatches' ? 'active' : ''}
+          onClick={() => handleTabChange('liveMatches')}
+        >
+          <Activity size={16} />
+          {t('management.liveMatches') || 'Live Matches'}
         </button>
       </div>
 
@@ -1367,6 +1997,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
         {activeTab === 'standings' && renderStandings()}
         {activeTab === 'playoffs' && renderPlayoffs()}
         {activeTab === 'statistics' && renderStatistics()}
+        {activeTab === 'liveMatches' && renderLiveMatches()}
       </div>
 
       {/* Edit Settings Modal */}
@@ -1421,7 +2052,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
               <div className="group-settings">
                 <h4>{t('registration.standingsCriteriaOrder')}</h4>
-                <p className="settings-description" style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+                <p className="settings-description" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
                   {t('registration.standingsCriteriaOrderDescription') || 'Nastavte poradie kritérií pre zoradenie v tabuľke skupín. Kritériá sa použijú v tomto poradí pri rovnakých hodnotách.'}
                 </p>
                 <div className="criteria-order-list" style={{ marginBottom: '1.5rem' }}>
@@ -1433,21 +2064,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                       headToHead: t('registration.headToHead')
                     };
                     return (
-                      <div key={criterion} className="criteria-order-item" style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        padding: '0.75rem', 
-                        marginBottom: '0.5rem',
-                        border: '1px solid #ddd',
-                        borderRadius: '4px',
-                        backgroundColor: '#f9f9f9'
-                      }}>
+                      <div key={criterion} className="criteria-order-item">
                         <span className="criteria-number" style={{ marginRight: '0.75rem', fontWeight: 'bold', minWidth: '2rem' }}>{index + 1}.</span>
                         <span className="criteria-label" style={{ flex: 1 }}>{criterionLabels[criterion] || criterion}</span>
                         <div className="criteria-actions" style={{ display: 'flex', gap: '0.25rem' }}>
                           <button
                             type="button"
-                            className="move-btn"
                             onClick={() => {
                               if (index > 0) {
                                 const newOrder = [...tournamentSettings.standingsCriteriaOrder];
@@ -1458,21 +2080,14 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                                 });
                               }
                             }}
-                            disabled={index === 0}
                             title={t('registration.moveUp')}
-                            style={{ 
-                              padding: '0.25rem 0.5rem',
-                              border: '1px solid #ddd',
-                              borderRadius: '4px',
-                              backgroundColor: index === 0 ? '#f0f0f0' : '#fff',
-                              cursor: index === 0 ? 'not-allowed' : 'pointer'
-                            }}
+                            className={index === 0 ? 'move-btn disabled' : 'move-btn'}
+                            disabled={index === 0}
                           >
                             <ChevronUp size={16} />
                           </button>
                           <button
                             type="button"
-                            className="move-btn"
                             onClick={() => {
                               if (index < tournamentSettings.standingsCriteriaOrder.length - 1) {
                                 const newOrder = [...tournamentSettings.standingsCriteriaOrder];
@@ -1483,15 +2098,9 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                                 });
                               }
                             }}
-                            disabled={index === tournamentSettings.standingsCriteriaOrder.length - 1}
                             title={t('registration.moveDown')}
-                            style={{ 
-                              padding: '0.25rem 0.5rem',
-                              border: '1px solid #ddd',
-                              borderRadius: '4px',
-                              backgroundColor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? '#f0f0f0' : '#fff',
-                              cursor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? 'not-allowed' : 'pointer'
-                            }}
+                            className={index === tournamentSettings.standingsCriteriaOrder.length - 1 ? 'move-btn disabled' : 'move-btn'}
+                            disabled={index === tournamentSettings.standingsCriteriaOrder.length - 1}
                           >
                             <ChevronDown size={16} />
                           </button>
@@ -1619,7 +2228,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                     <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
                       <div className="input-group">
-                        <label>{t('management.roundOf', { count: 16 })}:</label>
+                        <label>{t('management.top16')}:</label>
                         <select 
                           value={tournamentSettings.playoffSettings.legsToWinByRound?.[16] || 3}
                           onChange={(e) => setTournamentSettings({
@@ -1755,6 +2364,120 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           </div>
         </div>
       )}
+
+      {/* Match Statistics Modal */}
+      {matchStatistics && matchStatistics.result && (
+        <div className="modal-overlay">
+          <div className="modal match-statistics-modal">
+            <div className="modal-header">
+              <h3>{t('management.matchStatistics') || 'Match Statistics'}</h3>
+              <button 
+                className="close-btn"
+                onClick={() => setMatchStatistics(null)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="modal-content">
+              <div className="match-statistics-header">
+                <div className="match-players-header">
+                  <div className="player-header">
+                    <div className="player-name-stat">{matchStatistics.player1?.name || 'Player 1'}</div>
+                    <div className="player-legs-stat">{matchStatistics.result.player1Legs}</div>
+                  </div>
+                  <div className="vs-stat">vs</div>
+                  <div className="player-header">
+                    <div className="player-legs-stat">{matchStatistics.result.player2Legs}</div>
+                    <div className="player-name-stat">{matchStatistics.player2?.name || 'Player 2'}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="statistics-sections">
+                {/* Match Averages */}
+                <div className="statistics-section">
+                  <h4>{t('management.matchAverage') || 'Match Average'}</h4>
+                  <div className="statistics-row">
+                    <div className="stat-value">
+                      {matchStatistics.result.player1Stats?.average ? matchStatistics.result.player1Stats.average.toFixed(2) : '0.00'}
+                    </div>
+                    <div className="stat-label">Avg</div>
+                    <div className="stat-value">
+                      {matchStatistics.result.player2Stats?.average ? matchStatistics.result.player2Stats.average.toFixed(2) : '0.00'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Legs Won */}
+                <div className="statistics-section">
+                  <h4>{t('management.legsWon') || 'Legs Won'}</h4>
+                  <div className="statistics-row">
+                    <div className="stat-value">{matchStatistics.result.player1Legs || 0}</div>
+                    <div className="stat-label">Legs</div>
+                    <div className="stat-value">{matchStatistics.result.player2Legs || 0}</div>
+                  </div>
+                </div>
+
+                {/* Checkouts */}
+                <div className="statistics-section">
+                  <h4>{t('management.checkouts') || 'Checkouts'}</h4>
+                  <div className="statistics-row checkouts-row">
+                    <div className="checkouts-list">
+                      {matchStatistics.result.player1Stats?.checkouts && matchStatistics.result.player1Stats.checkouts.length > 0 ? (
+                        matchStatistics.result.player1Stats.checkouts
+                          .map(c => typeof c === 'object' ? c.checkout : c)
+                          .filter(c => c && c > 0)
+                          .sort((a, b) => b - a)
+                          .join(', ') || '-'
+                      ) : '-'}
+                    </div>
+                    <div className="stat-label">Checkouts</div>
+                    <div className="checkouts-list">
+                      {matchStatistics.result.player2Stats?.checkouts && matchStatistics.result.player2Stats.checkouts.length > 0 ? (
+                        matchStatistics.result.player2Stats.checkouts
+                          .map(c => typeof c === 'object' ? c.checkout : c)
+                          .filter(c => c && c > 0)
+                          .sort((a, b) => b - a)
+                          .join(', ') || '-'
+                      ) : '-'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Darts per Leg */}
+                <div className="statistics-section">
+                  <h4>{t('management.dartsPerLeg') || 'Darts per Leg'}</h4>
+                  <div className="legs-details">
+                    {Array.from({ length: Math.max(
+                      matchStatistics.result.player1Stats?.legs?.length || 0,
+                      matchStatistics.result.player2Stats?.legs?.length || 0
+                    ) }, (_, i) => i + 1).map(legNum => {
+                      const player1Leg = matchStatistics.result.player1Stats?.legs?.[legNum - 1];
+                      const player2Leg = matchStatistics.result.player2Stats?.legs?.[legNum - 1];
+                      const player1Darts = player1Leg?.darts || '-';
+                      const player2Darts = player2Leg?.darts || '-';
+                      const player1Won = player1Leg?.isWin;
+                      const player2Won = player2Leg?.isWin;
+
+                      return (
+                        <div key={legNum} className="leg-detail-row">
+                          <div className={`leg-darts ${player1Won ? 'winner' : ''}`}>
+                            {player1Darts}
+                          </div>
+                          <div className="leg-number">Leg {legNum}</div>
+                          <div className={`leg-darts ${player2Won ? 'winner' : ''}`}>
+                            {player2Darts}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1768,6 +2491,66 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
   const currentRound = allRounds.find(round => 
     round.matches.some(m => m.id === match.id)
   );
+  
+  const currentRoundIndex = allRounds.findIndex(round => 
+    round.matches.some(m => m.id === match.id)
+  );
+
+  // Get players who advanced from previous round
+  const getAdvancedPlayers = () => {
+    // If this is the first round, all qualifying players are available
+    if (currentRoundIndex === 0) {
+      return qualifyingPlayers.map(qp => qp.player || qp);
+    }
+    
+    // If this is a 3rd place match, get players who lost in semifinals
+    if (match.isThirdPlaceMatch) {
+      const previousRound = allRounds[currentRoundIndex - 1];
+      if (!previousRound) return [];
+      
+      const losers = [];
+      previousRound.matches.forEach(m => {
+        if (m.status === 'completed' && m.result && m.result.winner) {
+          // Get the loser (the player who didn't win)
+          const loser = m.result.winner === m.player1?.id ? m.player2 : m.player1;
+          if (loser) {
+            losers.push(loser);
+          }
+        }
+      });
+      
+      // If no matches completed yet, return empty (can't determine losers)
+      return losers;
+    }
+    
+    // For other rounds, get players who won in the previous round
+    const previousRound = allRounds[currentRoundIndex - 1];
+    if (!previousRound) return [];
+    
+    const winners = [];
+    previousRound.matches.forEach(m => {
+      if (m.status === 'completed' && m.result && m.result.winner) {
+        // Get the winner
+        const winner = m.result.winner === m.player1?.id ? m.player1 : m.player2;
+        if (winner) {
+          winners.push(winner);
+        }
+      }
+    });
+    
+    // If no matches completed yet, return empty (can't determine winners)
+    return winners;
+  };
+
+  const advancedPlayers = getAdvancedPlayers();
+  
+  // Check if previous round is complete
+  const isPreviousRoundComplete = () => {
+    if (currentRoundIndex === 0) return true; // First round, no previous round
+    const previousRound = allRounds[currentRoundIndex - 1];
+    if (!previousRound) return false;
+    return previousRound.matches.every(m => m.status === 'completed');
+  };
 
   // Get all players already assigned in other matches in the same round
   const getAssignedPlayers = () => {
@@ -1788,8 +2571,22 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
   const assignedPlayerIds = getAssignedPlayers();
 
   // Filter out already assigned players, but keep currently selected players
+  // Also filter to only show players who advanced from previous round (or all if first round)
   const getAvailablePlayers = (excludePlayerId = null) => {
-    return qualifyingPlayers.filter(player => {
+    // Use advanced players if available and previous round is complete
+    // Otherwise, if first round, use all qualifying players
+    // If later rounds but previous not complete, return empty (should complete previous round first)
+    let basePlayers;
+    if (currentRoundIndex === 0) {
+      basePlayers = qualifyingPlayers.map(qp => qp.player || qp);
+    } else if (advancedPlayers.length > 0 || isPreviousRoundComplete()) {
+      basePlayers = advancedPlayers;
+    } else {
+      // Previous round not complete yet - return empty list
+      basePlayers = [];
+    }
+    
+    return basePlayers.filter(player => {
       // Always include currently selected players (for player1 and player2 dropdowns)
       if (player.id === selectedPlayer1?.id || player.id === selectedPlayer2?.id) {
         return true;
@@ -1815,19 +2612,34 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
     onSave(selectedPlayer1, selectedPlayer2);
   };
 
+  const availablePlayers1 = getAvailablePlayers(selectedPlayer2?.id);
+  const availablePlayers2 = getAvailablePlayers(selectedPlayer1?.id);
+  const previousRoundComplete = isPreviousRoundComplete();
+
   return (
     <div className="edit-playoff-match-form">
+      {currentRoundIndex > 0 && (
+        <div className={`info-message ${!previousRoundComplete ? 'warning' : ''}`}>
+          {!previousRoundComplete ? (
+            `Please complete ${allRounds[currentRoundIndex - 1]?.name || 'previous round'} matches first to see available players`
+          ) : match.isThirdPlaceMatch ? (
+            'Only players who lost in semifinals are available'
+          ) : (
+            `Only players who advanced from ${allRounds[currentRoundIndex - 1]?.name || 'previous round'} are available`
+          )}
+        </div>
+      )}
       <div className="input-group">
         <label>Player 1:</label>
         <select
           value={selectedPlayer1?.id || ''}
           onChange={(e) => {
-            const player = qualifyingPlayers.find(p => p.id === e.target.value);
+            const player = availablePlayers1.find(p => p.id === e.target.value);
             setSelectedPlayer1(player || null);
           }}
         >
           <option value="">Select Player 1</option>
-          {getAvailablePlayers(selectedPlayer2?.id).map(player => (
+          {availablePlayers1.map(player => (
             <option key={player.id} value={player.id}>
               {player.name}
             </option>
@@ -1839,12 +2651,12 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
         <select
           value={selectedPlayer2?.id || ''}
           onChange={(e) => {
-            const player = qualifyingPlayers.find(p => p.id === e.target.value);
+            const player = availablePlayers2.find(p => p.id === e.target.value);
             setSelectedPlayer2(player || null);
           }}
         >
           <option value="">Select Player 2</option>
-          {getAvailablePlayers(selectedPlayer1?.id).map(player => (
+          {availablePlayers2.map(player => (
             <option key={player.id} value={player.id}>
               {player.name}
             </option>

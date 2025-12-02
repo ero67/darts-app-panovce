@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Users, Play, ArrowLeft, Settings, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Users, Play, ArrowLeft, Settings, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { useTournament } from '../contexts/TournamentContext';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -49,7 +49,7 @@ export function TournamentRegistration({ tournament, onBack }) {
       };
     })()
   });
-  const { addPlayerToTournament, startTournament, updateTournamentSettings } = useTournament();
+  const { addPlayerToTournament, removePlayerFromTournament, startTournament, updateTournamentSettings } = useTournament();
 
   const addPlayer = async () => {
     if (!newPlayerName.trim()) {
@@ -68,6 +68,24 @@ export function TournamentRegistration({ tournament, onBack }) {
     } catch (error) {
       console.error('Error adding player:', error);
       alert(t('registration.failedToAddPlayer'));
+    }
+  };
+
+  const removePlayer = async (playerId) => {
+    if (tournament.status !== 'open_for_registration') {
+      alert(t('registration.cannotRemovePlayerAfterStart') || 'Cannot remove players after tournament has started');
+      return;
+    }
+
+    if (!confirm(t('registration.confirmRemovePlayer') || `Are you sure you want to remove this player?`)) {
+      return;
+    }
+
+    try {
+      await removePlayerFromTournament(playerId);
+    } catch (error) {
+      console.error('Error removing player:', error);
+      alert(t('registration.failedToRemovePlayer') || 'Failed to remove player. Please try again.');
     }
   };
 
@@ -158,6 +176,15 @@ export function TournamentRegistration({ tournament, onBack }) {
                   <div key={player.id} className="player-card">
                     <span className="player-number">{index + 1}</span>
                     <span className="player-name">{player.name}</span>
+                    {tournament.status === 'open_for_registration' && (
+                      <button
+                        className="remove-player-btn"
+                        onClick={() => removePlayer(player.id)}
+                        title={t('registration.removePlayer') || 'Remove player'}
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -509,7 +536,7 @@ export function TournamentRegistration({ tournament, onBack }) {
                       <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
                       <div className="input-group">
-                        <label>{t('management.roundOf', { count: 16 })}:</label>
+                        <label>{t('management.top16')}:</label>
                         <select 
                           value={tournamentSettings.playoffSettings.legsToWinByRound?.[16] || 3}
                           onChange={(e) => setTournamentSettings({
