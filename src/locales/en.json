@@ -249,7 +249,17 @@
     "noMatchesYet": "No matches created yet.",
     "matchAverage": "Match Average",
     "legsWon": "Legs Won",
-    "dartsPerLeg": "Darts per Leg"
+    "dartsPerLeg": "Darts per Leg",
+    "selectPlayer1": "Select Player 1",
+    "selectPlayer2": "Select Player 2",
+    "player1": "Player 1",
+    "player2": "Player 2",
+    "pleaseSelectBothPlayers": "Please select both players",
+    "playersMustBeDifferent": "Players must be different",
+    "completePreviousRoundFirst": "Please complete {{roundName}} matches first to see available players",
+    "onlySemifinalLosersAvailable": "Only players who lost in semifinals are available",
+    "onlyAdvancedPlayersAvailable": "Only players who advanced from {{roundName}} are available",
+    "previousRound": "previous round"
   },
   "auth": {
     "appTitle": "Darts Tournament Manager",

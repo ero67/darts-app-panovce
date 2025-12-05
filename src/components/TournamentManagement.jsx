@@ -2651,6 +2651,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
 // Component for editing playoff match players
 function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onCancel }) {
+  const { t } = useLanguage();
   const [selectedPlayer1, setSelectedPlayer1] = useState(match.player1);
   const [selectedPlayer2, setSelectedPlayer2] = useState(match.player2);
 
@@ -2769,11 +2770,11 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
 
   const handleSave = () => {
     if (!selectedPlayer1 || !selectedPlayer2) {
-      alert('Please select both players');
+      alert(t('management.pleaseSelectBothPlayers'));
       return;
     }
     if (selectedPlayer1.id === selectedPlayer2.id) {
-      alert('Players must be different');
+      alert(t('management.playersMustBeDifferent'));
       return;
     }
     onSave(selectedPlayer1, selectedPlayer2);
@@ -2788,16 +2789,20 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
       {currentRoundIndex > 0 && (
         <div className={`info-message ${!previousRoundComplete ? 'warning' : ''}`}>
           {!previousRoundComplete ? (
-            `Please complete ${allRounds[currentRoundIndex - 1]?.name || 'previous round'} matches first to see available players`
+            t('management.completePreviousRoundFirst', { 
+              roundName: allRounds[currentRoundIndex - 1]?.name || t('management.previousRound')
+            })
           ) : match.isThirdPlaceMatch ? (
-            'Only players who lost in semifinals are available'
+            t('management.onlySemifinalLosersAvailable')
           ) : (
-            `Only players who advanced from ${allRounds[currentRoundIndex - 1]?.name || 'previous round'} are available`
+            t('management.onlyAdvancedPlayersAvailable', {
+              roundName: allRounds[currentRoundIndex - 1]?.name || t('management.previousRound')
+            })
           )}
         </div>
       )}
       <div className="input-group">
-        <label>Player 1:</label>
+        <label>{t('management.player1')}:</label>
         <select
           value={selectedPlayer1?.id || ''}
           onChange={(e) => {
@@ -2805,7 +2810,7 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
             setSelectedPlayer1(player || null);
           }}
         >
-          <option value="">Select Player 1</option>
+          <option value="">{t('management.selectPlayer1')}</option>
           {availablePlayers1.map(player => (
             <option key={player.id} value={player.id}>
               {player.name}
@@ -2814,7 +2819,7 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
         </select>
       </div>
       <div className="input-group">
-        <label>Player 2:</label>
+        <label>{t('management.player2')}:</label>
         <select
           value={selectedPlayer2?.id || ''}
           onChange={(e) => {
@@ -2822,7 +2827,7 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
             setSelectedPlayer2(player || null);
           }}
         >
-          <option value="">Select Player 2</option>
+          <option value="">{t('management.selectPlayer2')}</option>
           {availablePlayers2.map(player => (
             <option key={player.id} value={player.id}>
               {player.name}

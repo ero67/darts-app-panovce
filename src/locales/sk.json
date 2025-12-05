@@ -260,7 +260,17 @@
     "noMatchesYet": "Zatiaľ neboli vytvorené žiadne zápasy.",
     "matchAverage": "Priemer Zápasu",
     "legsWon": "Vyhrané Legy",
-    "dartsPerLeg": "Šípky na Leg"
+    "dartsPerLeg": "Šípky na Leg",
+    "selectPlayer1": "Vyberte Hráča 1",
+    "selectPlayer2": "Vyberte Hráča 2",
+    "player1": "Hráč 1",
+    "player2": "Hráč 2",
+    "pleaseSelectBothPlayers": "Prosím vyberte oboch hráčov",
+    "playersMustBeDifferent": "Hráči musia byť rôzni",
+    "completePreviousRoundFirst": "Prosím dokončite najprv zápasy {{roundName}}, aby ste videli dostupných hráčov",
+    "onlySemifinalLosersAvailable": "Dostupní sú iba hráči, ktorí prehrali v semifinále",
+    "onlyAdvancedPlayersAvailable": "Dostupní sú iba hráči, ktorí postúpili z {{roundName}}",
+    "previousRound": "predchádzajúceho kola"
   },
   "auth": {
     "appTitle": "Správca Šípkových Turnajov",
