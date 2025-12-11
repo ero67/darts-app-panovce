@@ -7,8 +7,24 @@ export function AdminProvider({ children }) {
   const { user } = useAuth();
   const [isAdminMode, setIsAdminMode] = useState(false);
 
-  // Check if user is admin
-  const isAdmin = user?.user_metadata?.role === 'admin';
+  // Check if user is admin - check multiple metadata locations
+  const isAdmin = !!(
+    user?.user_metadata?.role === 'admin' ||
+    user?.app_metadata?.role === 'admin' ||
+    user?.raw_user_meta_data?.role === 'admin' ||
+    user?.raw_app_meta_data?.role === 'admin'
+  );
+
+  // Check if user is manager - check multiple metadata locations
+  const isManager = !!(
+    user?.user_metadata?.role === 'manager' ||
+    user?.app_metadata?.role === 'manager' ||
+    user?.raw_user_meta_data?.role === 'manager' ||
+    user?.raw_app_meta_data?.role === 'manager'
+  );
+
+  // Check if user can create tournaments (admin or manager)
+  const canCreateTournaments = isAdmin || isManager;
 
   // Admin functions for correcting mistakes
   const adminFunctions = {
@@ -51,6 +67,8 @@ export function AdminProvider({ children }) {
 
   const value = {
     isAdmin,
+    isManager,
+    canCreateTournaments,
     isAdminMode,
     setIsAdminMode,
     adminFunctions

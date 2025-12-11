@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Users, Play, ArrowLeft, Settings, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { useTournament } from '../contexts/TournamentContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -8,17 +8,16 @@ export function TournamentRegistration({ tournament, onBack }) {
   // Ensure players is always an array
   const players = tournament.players || [];
   const [newPlayerName, setNewPlayerName] = useState('');
-  const [showStartTournament, setShowStartTournament] = useState(false);
   const [showEditSettings, setShowEditSettings] = useState(false);
-  const [groupSettings, setGroupSettings] = useState({
-    type: 'groups', // 'groups' or 'playersPerGroup'
-    value: 2
-  });
   const [tournamentSettings, setTournamentSettings] = useState({
     legsToWin: tournament.legsToWin || 3,
     startingScore: tournament.startingScore || 501,
-    groupSettings: groupSettings,
-    standingsCriteriaOrder: tournament.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+    groupSettings: tournament.groupSettings || {
+      type: 'groups', // 'groups' or 'playersPerGroup'
+      value: 2,
+      standingsCriteriaOrder: ['matchesWon', 'legDifference', 'average', 'headToHead']
+    },
+    standingsCriteriaOrder: tournament.standingsCriteriaOrder || tournament.groupSettings?.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
     playoffSettings: (() => {
       const existing = tournament.playoffSettings;
       if (existing && existing.legsToWinByRound) {
@@ -29,6 +28,7 @@ export function TournamentRegistration({ tournament, onBack }) {
         return {
           ...existing,
           legsToWinByRound: {
+            32: existing.playoffLegsToWin,
             16: existing.playoffLegsToWin,
             8: existing.playoffLegsToWin,
             4: existing.playoffLegsToWin,
@@ -40,7 +40,10 @@ export function TournamentRegistration({ tournament, onBack }) {
       return {
         enabled: false,
         playersPerGroup: 1,
+        seedingMethod: tournament.playoffSettings?.seedingMethod || 'standard',
+        groupMatchups: tournament.playoffSettings?.groupMatchups || [],
         legsToWinByRound: {
+          32: 3,  // Round of 32
           16: 3,  // Round of 16
           8: 3,   // Quarter-finals
           4: 3,   // Semi-finals
@@ -50,6 +53,51 @@ export function TournamentRegistration({ tournament, onBack }) {
     })()
   });
   const { addPlayerToTournament, removePlayerFromTournament, startTournament, updateTournamentSettings } = useTournament();
+
+  // Update tournamentSettings when tournament prop changes (e.g., after reload from DB)
+  useEffect(() => {
+    if (tournament) {
+      setTournamentSettings({
+        legsToWin: tournament.legsToWin || 3,
+        startingScore: tournament.startingScore || 501,
+        groupSettings: tournament.groupSettings || {
+          type: 'groups',
+          value: 2,
+          standingsCriteriaOrder: ['matchesWon', 'legDifference', 'average', 'headToHead']
+        },
+        standingsCriteriaOrder: tournament.standingsCriteriaOrder || tournament.groupSettings?.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+        playoffSettings: (() => {
+          const existing = tournament.playoffSettings;
+          if (existing && existing.legsToWinByRound) {
+            return existing;
+          }
+          // Migrate old structure to new structure
+          if (existing && existing.playoffLegsToWin) {
+            return {
+              ...existing,
+              legsToWinByRound: {
+                16: existing.playoffLegsToWin,
+                8: existing.playoffLegsToWin,
+                4: existing.playoffLegsToWin,
+                2: existing.playoffLegsToWin
+              }
+            };
+          }
+          // Default new structure
+          return {
+            enabled: false,
+            playersPerGroup: 1,
+            legsToWinByRound: {
+              16: 3,  // Round of 16
+              8: 3,   // Quarter-finals
+              4: 3,   // Semi-finals
+              2: 3    // Final
+            }
+          };
+        })()
+      });
+    }
+  }, [tournament?.id, tournament?.legsToWin, tournament?.startingScore, tournament?.groupSettings, tournament?.standingsCriteriaOrder, tournament?.playoffSettings]);
 
   const addPlayer = async () => {
     if (!newPlayerName.trim()) {
@@ -96,8 +144,7 @@ export function TournamentRegistration({ tournament, onBack }) {
     }
 
     try {
-      await startTournament(groupSettings);
-      setShowStartTournament(false);
+      await startTournament(tournamentSettings.groupSettings);
     } catch (error) {
       console.error('Error starting tournament:', error);
       alert(t('registration.failedToStartTournament'));
@@ -196,7 +243,7 @@ export function TournamentRegistration({ tournament, onBack }) {
           <div className="start-tournament-section">
             <button 
               className="start-tournament-btn"
-              onClick={() => setShowStartTournament(true)}
+              onClick={handleStartTournament}
             >
               <Play size={20} />
               {t('registration.startTournament')}
@@ -204,94 +251,6 @@ export function TournamentRegistration({ tournament, onBack }) {
           </div>
         )}
       </div>
-
-      {showStartTournament && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <h3>{t('registration.startTournament')}</h3>
-              <button 
-                className="close-btn"
-                onClick={() => setShowStartTournament(false)}
-              >
-                ×
-              </button>
-            </div>
-            
-            <div className="modal-content">
-              <p>{t('registration.configureGroupDivision')}:</p>
-              
-              <div className="group-settings">
-                <div className="radio-group">
-                  <label>
-                    <input
-                      type="radio"
-                      name="groupType"
-                      value="groups"
-                      checked={groupSettings.type === 'groups'}
-                      onChange={(e) => setGroupSettings({...groupSettings, type: e.target.value})}
-                    />
-                    {t('registration.numberOfGroups')}
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="groupType"
-                      value="playersPerGroup"
-                      checked={groupSettings.type === 'playersPerGroup'}
-                      onChange={(e) => setGroupSettings({...groupSettings, type: e.target.value})}
-                    />
-                    {t('registration.playersPerGroup')}
-                  </label>
-                </div>
-                
-                <div className="input-group">
-                  <input
-                    type="number"
-                    min="1"
-                    max={groupSettings.type === 'groups' ? players.length : Math.ceil(players.length / 2)}
-                    value={groupSettings.value}
-                    onChange={(e) => setGroupSettings({...groupSettings, value: parseInt(e.target.value)})}
-                  />
-                  <span>
-                    {groupSettings.type === 'groups' ? t('common.groups') : t('registration.playersPerGroup')}
-                  </span>
-                </div>
-              </div>
-
-              <div className="tournament-preview">
-                <h4>{t('registration.tournamentPreview')}:</h4>
-                <p><strong>{t('registration.players')}:</strong> {players.length}</p>
-                <p><strong>{t('registration.groups')}:</strong> {
-                  groupSettings.type === 'groups' 
-                    ? groupSettings.value 
-                    : Math.ceil(players.length / groupSettings.value)
-                }</p>
-                <p><strong>{t('registration.playersPerGroup')}:</strong> {
-                  groupSettings.type === 'groups'
-                    ? Math.ceil(players.length / groupSettings.value)
-                    : groupSettings.value
-                }</p>
-              </div>
-            </div>
-            
-            <div className="modal-actions">
-              <button 
-                className="cancel-btn"
-                onClick={() => setShowStartTournament(false)}
-              >
-                {t('common.cancel')}
-              </button>
-              <button 
-                className="confirm-btn"
-                onClick={handleStartTournament}
-              >
-                {t('registration.startTournament')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Edit Settings Modal */}
       {showEditSettings && (
@@ -345,7 +304,7 @@ export function TournamentRegistration({ tournament, onBack }) {
 
               <div className="group-settings">
                 <h4>{t('registration.standingsCriteriaOrder')}</h4>
-                <p className="settings-description" style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+                <p className="settings-description" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
                   {t('registration.standingsCriteriaOrderDescription') || 'Nastavte poradie kritérií pre zoradenie v tabuľke skupín. Kritériá sa použijú v tomto poradí pri rovnakých hodnotách.'}
                 </p>
                 <div className="criteria-order-list" style={{ marginBottom: '1.5rem' }}>
@@ -357,21 +316,13 @@ export function TournamentRegistration({ tournament, onBack }) {
                       headToHead: t('registration.headToHead')
                     };
                     return (
-                      <div key={criterion} className="criteria-order-item" style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        padding: '0.75rem', 
-                        marginBottom: '0.5rem',
-                        border: '1px solid #ddd',
-                        borderRadius: '4px',
-                        backgroundColor: '#f9f9f9'
-                      }}>
-                        <span className="criteria-number" style={{ marginRight: '0.75rem', fontWeight: 'bold', minWidth: '2rem' }}>{index + 1}.</span>
-                        <span className="criteria-label" style={{ flex: 1 }}>{criterionLabels[criterion] || criterion}</span>
-                        <div className="criteria-actions" style={{ display: 'flex', gap: '0.25rem' }}>
+                      <div key={criterion} className="criteria-order-item">
+                        <span className="criteria-number">{index + 1}.</span>
+                        <span className="criteria-label">{criterionLabels[criterion] || criterion}</span>
+                        <div className="criteria-actions">
                           <button
                             type="button"
-                            className="move-btn"
+                            className={index === 0 ? 'move-btn disabled' : 'move-btn'}
                             onClick={() => {
                               if (index > 0) {
                                 const newOrder = [...tournamentSettings.standingsCriteriaOrder];
@@ -384,19 +335,12 @@ export function TournamentRegistration({ tournament, onBack }) {
                             }}
                             disabled={index === 0}
                             title={t('registration.moveUp')}
-                            style={{ 
-                              padding: '0.25rem 0.5rem',
-                              border: '1px solid #ddd',
-                              borderRadius: '4px',
-                              backgroundColor: index === 0 ? '#f0f0f0' : '#fff',
-                              cursor: index === 0 ? 'not-allowed' : 'pointer'
-                            }}
                           >
                             <ChevronUp size={16} />
                           </button>
                           <button
                             type="button"
-                            className="move-btn"
+                            className={index === tournamentSettings.standingsCriteriaOrder.length - 1 ? 'move-btn disabled' : 'move-btn'}
                             onClick={() => {
                               if (index < tournamentSettings.standingsCriteriaOrder.length - 1) {
                                 const newOrder = [...tournamentSettings.standingsCriteriaOrder];
@@ -409,13 +353,6 @@ export function TournamentRegistration({ tournament, onBack }) {
                             }}
                             disabled={index === tournamentSettings.standingsCriteriaOrder.length - 1}
                             title={t('registration.moveDown')}
-                            style={{ 
-                              padding: '0.25rem 0.5rem',
-                              border: '1px solid #ddd',
-                              borderRadius: '4px',
-                              backgroundColor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? '#f0f0f0' : '#fff',
-                              cursor: index === tournamentSettings.standingsCriteriaOrder.length - 1 ? 'not-allowed' : 'pointer'
-                            }}
                           >
                             <ChevronDown size={16} />
                           </button>
@@ -533,8 +470,255 @@ export function TournamentRegistration({ tournament, onBack }) {
                           <option value={allPlayersValue}>All</option>
                         </select>
                       </div>
+                      
+                      <div className="input-group">
+                        <label>{t('registration.seedingMethod') || 'Seeding Method'}</label>
+                        <div className="radio-group">
+                          <label>
+                            <input
+                              type="radio"
+                              name="seedingMethod"
+                              value="standard"
+                              checked={tournamentSettings.playoffSettings.seedingMethod === 'standard'}
+                              onChange={(e) => setTournamentSettings({
+                                ...tournamentSettings,
+                                playoffSettings: {
+                                  ...tournamentSettings.playoffSettings,
+                                  seedingMethod: e.target.value
+                                }
+                              })}
+                            />
+                            {t('registration.seedingMethodStandard') || 'Standard Tournament Seeding'}
+                          </label>
+                          <label>
+                            <input
+                              type="radio"
+                              name="seedingMethod"
+                              value="groupBased"
+                              checked={tournamentSettings.playoffSettings.seedingMethod === 'groupBased'}
+                              onChange={(e) => setTournamentSettings({
+                                ...tournamentSettings,
+                                playoffSettings: {
+                                  ...tournamentSettings.playoffSettings,
+                                  seedingMethod: e.target.value
+                                }
+                              })}
+                            />
+                            {t('registration.seedingMethodGroupBased') || 'Group-Based Seeding'}
+                          </label>
+                        </div>
+                      </div>
+
+                      {tournamentSettings.playoffSettings.seedingMethod === 'groupBased' && (
+                        <div className="input-group">
+                          <label>{t('registration.groupMatchups') || 'Group Matchups'}</label>
+                          {tournament.groups && tournament.groups.length > 0 ? (
+                            <>
+                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                                {t('registration.groupMatchupsDescription') || 'Configure which groups play against each other. 1st from Group A vs last advancing from Group D, etc.'}
+                              </p>
+                          <div className="group-matchups-config" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {(() => {
+                              const groups = tournament.groups || [];
+                              const numGroups = groups.length;
+                              const matchups = tournamentSettings.playoffSettings.groupMatchups || [];
+                              
+                              // Initialize matchups if empty
+                              if (matchups.length === 0 && numGroups >= 2) {
+                                // Auto-generate default matchups: A vs last group, B vs second-to-last, etc.
+                                const defaultMatchups = [];
+                                for (let i = 0; i < Math.floor(numGroups / 2); i++) {
+                                  const group1Index = i;
+                                  const group2Index = numGroups - 1 - i;
+                                  defaultMatchups.push({
+                                    group1: groups[group1Index]?.name || `Group ${String.fromCharCode(65 + group1Index)}`,
+                                    group2: groups[group2Index]?.name || `Group ${String.fromCharCode(65 + group2Index)}`
+                                  });
+                                }
+                                // Update state with default matchups
+                                setTimeout(() => {
+                                  setTournamentSettings({
+                                    ...tournamentSettings,
+                                    playoffSettings: {
+                                      ...tournamentSettings.playoffSettings,
+                                      groupMatchups: defaultMatchups
+                                    }
+                                  });
+                                }, 0);
+                                return null;
+                              }
+                              
+                              return matchups.map((matchup, index) => {
+                                const availableGroups = groups.map(g => g.name);
+                                return (
+                                  <div key={index} style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.5rem',
+                                    padding: '0.75rem',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'var(--bg-tertiary)'
+                                  }}>
+                                    <select
+                                      value={matchup.group1}
+                                      onChange={(e) => {
+                                        const newMatchups = [...matchups];
+                                        newMatchups[index].group1 = e.target.value;
+                                        setTournamentSettings({
+                                          ...tournamentSettings,
+                                          playoffSettings: {
+                                            ...tournamentSettings.playoffSettings,
+                                            groupMatchups: newMatchups
+                                          }
+                                        });
+                                      }}
+                                      style={{ 
+                                        flex: 1, 
+                                        padding: '0.5rem',
+                                        backgroundColor: 'var(--input-bg)',
+                                        color: 'var(--text-primary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '4px'
+                                      }}
+                                    >
+                                      {availableGroups.map(groupName => (
+                                        <option key={groupName} value={groupName}>{groupName}</option>
+                                      ))}
+                                    </select>
+                                    <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>vs</span>
+                                    <select
+                                      value={matchup.group2}
+                                      onChange={(e) => {
+                                        const newMatchups = [...matchups];
+                                        newMatchups[index].group2 = e.target.value;
+                                        setTournamentSettings({
+                                          ...tournamentSettings,
+                                          playoffSettings: {
+                                            ...tournamentSettings.playoffSettings,
+                                            groupMatchups: newMatchups
+                                          }
+                                        });
+                                      }}
+                                      style={{ 
+                                        flex: 1, 
+                                        padding: '0.5rem',
+                                        backgroundColor: 'var(--input-bg)',
+                                        color: 'var(--text-primary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '4px'
+                                      }}
+                                    >
+                                      {availableGroups.map(groupName => (
+                                        <option key={groupName} value={groupName}>{groupName}</option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newMatchups = matchups.filter((_, i) => i !== index);
+                                        setTournamentSettings({
+                                          ...tournamentSettings,
+                                          playoffSettings: {
+                                            ...tournamentSettings.playoffSettings,
+                                            groupMatchups: newMatchups
+                                          }
+                                        });
+                                      }}
+                                      style={{ 
+                                        padding: '0.25rem 0.5rem',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'var(--card-bg)',
+                                        color: 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease'
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.target.style.backgroundColor = 'var(--bg-tertiary)';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.target.style.backgroundColor = 'var(--card-bg)';
+                                      }}
+                                    >
+                                      <X size={16} />
+                                    </button>
+                                  </div>
+                                );
+                              });
+                            })()}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const groups = tournament.groups || [];
+                                const availableGroups = groups.map(g => g.name);
+                                if (availableGroups.length >= 2) {
+                                  const newMatchups = [
+                                    ...(tournamentSettings.playoffSettings.groupMatchups || []),
+                                    { group1: availableGroups[0], group2: availableGroups[1] }
+                                  ];
+                                  setTournamentSettings({
+                                    ...tournamentSettings,
+                                    playoffSettings: {
+                                      ...tournamentSettings.playoffSettings,
+                                      groupMatchups: newMatchups
+                                    }
+                                  });
+                                }
+                              }}
+                              style={{
+                                padding: '0.5rem',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '4px',
+                                backgroundColor: 'var(--card-bg)',
+                                color: 'var(--text-primary)',
+                                cursor: 'pointer',
+                                alignSelf: 'flex-start',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.backgroundColor = 'var(--bg-tertiary)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.backgroundColor = 'var(--card-bg)';
+                              }}
+                            >
+                              {t('registration.addGroupMatchup') || '+ Add Group Matchup'}
+                            </button>
+                          </div>
+                            </>
+                          ) : (
+                            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontStyle: 'italic', padding: '0.75rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                              {t('registration.groupMatchupsNote') || 'Note: Groups must be created first (start the tournament) before you can configure group matchups.'}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      
                       <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
+                      <div className="input-group">
+                        <label>{t('management.roundOf', { count: 32 })}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[32] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                32: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
                       <div className="input-group">
                         <label>{t('management.top16')}:</label>
                         <select 

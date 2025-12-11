@@ -27,6 +27,8 @@ export function TournamentCreation({ onTournamentCreated, onBack }) {
     qualificationMode: 'perGroup', // 'perGroup' or 'totalPlayers'
     playersPerGroup: 1,
     totalPlayersToAdvance: 8,
+    seedingMethod: 'standard', // 'standard' or 'groupBased'
+    groupMatchups: [], // Array of {group1: 'A', group2: 'D'} for group-based seeding
     legsToWinByRound: {
       16: 3,  // Round of 16
       8: 3,   // Quarter-finals
@@ -306,6 +308,53 @@ export function TournamentCreation({ onTournamentCreated, onBack }) {
                   </p>
                 </div>
               )}
+              
+              <div className="input-group">
+                <label>{t('registration.seedingMethod') || 'Seeding Method'}</label>
+                <div className="radio-group">
+                  <label>
+                    <input
+                      type="radio"
+                      name="seedingMethod"
+                      value="standard"
+                      checked={playoffSettings.seedingMethod === 'standard'}
+                      onChange={(e) => setPlayoffSettings({
+                        ...playoffSettings,
+                        seedingMethod: e.target.value
+                      })}
+                    />
+                    {t('registration.seedingMethodStandard') || 'Standard Tournament Seeding'}
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="seedingMethod"
+                      value="groupBased"
+                      checked={playoffSettings.seedingMethod === 'groupBased'}
+                      onChange={(e) => setPlayoffSettings({
+                        ...playoffSettings,
+                        seedingMethod: e.target.value
+                      })}
+                    />
+                    {t('registration.seedingMethodGroupBased') || 'Group-Based Seeding'}
+                  </label>
+                </div>
+              </div>
+
+              {playoffSettings.seedingMethod === 'groupBased' && (
+                <div className="input-group">
+                  <label>{t('registration.groupMatchups') || 'Group Matchups'}</label>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                    {t('registration.groupMatchupsDescription') || 'Configure which groups play against each other. Groups will be created when tournament starts.'}
+                  </p>
+                  <div className="group-matchups-config" style={{ marginTop: '1rem' }}>
+                    <p style={{ fontSize: '0.9rem', fontStyle: 'italic', color: 'var(--text-secondary)' }}>
+                      {t('registration.groupMatchupsNote') || 'Note: Group matchups will be configured after groups are created during tournament start.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+              
               <div className="playoff-legs-settings">
                 <h5>{t('registration.playoffLegsToWin')}:</h5>
                 <div className="input-group">

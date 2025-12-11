@@ -4,13 +4,9 @@ This guide explains how to set up admin roles for the Darts Tournament App.
 
 ## Database Setup
 
-1. **Run the SQL migration** to add admin role support:
-   ```bash
-   # Execute the SQL file in your Supabase SQL Editor
-   add-admin-role.sql
-   ```
-
-   This creates a helper function `is_admin()` that checks if a user has admin role.
+1. **SQL Script Reference**:
+   - See `SQLscripts/set-admin-role.sql` for SQL examples on how to set/check/remove admin roles
+   - No database migration is required - admin roles are stored in user metadata
 
 ## Setting a User as Admin
 

@@ -107,42 +107,36 @@ function tournamentReducer(state, action) {
             const currentRound = rounds[foundRoundIndex];
             const isSemifinal = currentRound && currentRound.matches && currentRound.matches.length === 2 && foundRoundIndex < rounds.length - 1;
             
-            // Advance winner to next round if not the final
+            // Automatically advance winner to next round if not the final
+            // This implements standard tournament bracket progression
             if (foundRoundIndex < rounds.length - 1) {
               const nextRound = rounds[foundRoundIndex + 1];
               if (nextRound && nextRound.matches) {
-                // Find the final match (not 3rd place match)
-                const finalMatch = nextRound.matches.find(m => !m.isThirdPlaceMatch);
+                // Calculate which match in the next round this winner should go to
+                // Standard bracket: Match 0 and Match 1 winners -> Next Round Match 0
+                //                   Match 2 and Match 3 winners -> Next Round Match 1
+                //                   etc.
+                const nextMatchIndex = Math.floor(foundMatchIndex / 2);
+                const nextMatch = nextRound.matches[nextMatchIndex];
                 
-                if (finalMatch) {
-                  // Determine which position in final match
-                  // First semifinal winner -> player1, second semifinal winner -> player2
-                  if (foundMatchIndex === 0) {
-                    finalMatch.player1 = winnerPlayer;
-                  } else if (foundMatchIndex === 1) {
-                    finalMatch.player2 = winnerPlayer;
+                if (nextMatch && !nextMatch.isThirdPlaceMatch) {
+                  // Determine position: even matchIndex -> player1, odd -> player2
+                  const isFirstMatchOfPair = (foundMatchIndex % 2 === 0);
+                  
+                  // Only auto-assign if not manually overridden
+                  // (We'll add manual override flag later, for now always assign)
+                  if (isFirstMatchOfPair) {
+                    nextMatch.player1 = winnerPlayer;
+                  } else {
+                    nextMatch.player2 = winnerPlayer;
                   }
                   
                   // Update match status if both players are set
-                  if (finalMatch.player1 && finalMatch.player2) {
-                    finalMatch.status = 'pending';
-                  }
-                } else {
-                  // Fallback to old logic if no final match found (for brackets without 3rd place match)
-                  const nextMatchIndex = Math.floor(foundMatchIndex / 2);
-                  const nextMatch = nextRound.matches[nextMatchIndex];
-                  
-                  if (nextMatch && !nextMatch.isThirdPlaceMatch) {
-                    const isFirstMatchOfPair = (foundMatchIndex % 2 === 0);
-                    if (isFirstMatchOfPair) {
-                      nextMatch.player1 = winnerPlayer;
-                    } else {
-                      nextMatch.player2 = winnerPlayer;
-                    }
-                    
-                    if (nextMatch.player1 && nextMatch.player2) {
-                      nextMatch.status = 'pending';
-                    }
+                  if (nextMatch.player1 && nextMatch.player2) {
+                    nextMatch.status = 'pending';
+                  } else {
+                    // If only one player is set, mark as waiting
+                    nextMatch.status = 'pending';
                   }
                 }
               }

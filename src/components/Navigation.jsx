@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Trophy, Users, Target, Settings, LogOut, User, Menu, X, Moon, Sun } from 'lucide-react';
+import { Home, Trophy, Users, Target, Settings, LogOut, User, Menu, X, Moon, Sun, Shield, Crown, Badge } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAdmin } from '../contexts/AdminContext';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -8,6 +9,7 @@ import logo from '../assets/logo.png';
 
 export function Navigation({ currentView, onViewChange, tournament, isMobileOpen, onMobileClose }) {
   const { user, signOut } = useAuth();
+  const { isAdmin, isManager } = useAdmin();
   const { t } = useLanguage();
   const { isDarkMode, toggleTheme } = useTheme();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -27,6 +29,7 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
   const navItems = [
     { id: '/', label: t('navigation.dashboard'), icon: Home },
     { id: '/tournaments', label: t('navigation.tournaments'), icon: Trophy },
+    // { id: '/privacy', label: 'Privacy', icon: Shield },
     // { id: '/players', label: t('navigation.players'), icon: Users },
     // { id: '/settings', label: t('navigation.settings'), icon: Settings }
   ];
@@ -104,18 +107,65 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
             </button>
           );
         })}
+        {isAdmin && (
+          <button
+            className={`nav-item ${currentView === '/admin' ? 'active' : ''}`}
+            onClick={() => handleNavItemClick('/admin')}
+            title={isCollapsed ? 'Admin Panel' : ''}
+          >
+            <Crown size={18} />
+            {(!isCollapsed || isMobile) && <span>Admin Panel</span>}
+          </button>
+        )}
       </div>
       
       <div className="nav-footer">
+        <button
+          className="nav-item"
+          onClick={() => handleNavItemClick('/privacy')}
+          title={isCollapsed ? 'Privacy' : ''}
+        >
+          <Shield size={16} />
+          {(!isCollapsed || isMobile) && <span>Privacy</span>}
+        </button>
         {user ? (
           <>
             <div className="user-info">
               <User size={16} />
               {(!isCollapsed || isMobile) && (
                 <div className="user-details">
-                  <span className="user-name">{user?.user_metadata?.full_name || user?.email || 'User'}</span>
-                  <span className="user-role">{t('navigation.adminScorer')}</span>
+                  <div className="user-name-row">
+                    <span className="user-name">{user?.user_metadata?.full_name || user?.email || 'User'}</span>
+                    {isAdmin && (
+                      <Crown 
+                        size={14} 
+                        className="admin-icon" 
+                        title="Administrator"
+                      />
+                    )}
+                    {!isAdmin && isManager && (
+                      <Badge 
+                        size={14} 
+                        className="manager-icon" 
+                        title="Manager"
+                      />
+                    )}
+                  </div>
                 </div>
+              )}
+              {isCollapsed && isAdmin && (
+                <Crown 
+                  size={14} 
+                  className="admin-icon" 
+                  title="Administrator"
+                />
+              )}
+              {isCollapsed && !isAdmin && isManager && (
+                <Badge 
+                  size={14} 
+                  className="manager-icon" 
+                  title="Manager"
+                />
               )}
             </div>
             <div className="language-section">

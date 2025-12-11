@@ -154,6 +154,7 @@
     "legsToWin": "Legs to Win",
     "startingScore": "Starting Score",
     "groupSettings": "Group Settings",
+    "groupSettingsLocked": "Group count is locked after matches have started.",
     "playoffSettings": "Playoff Settings",
     "enablePlayoffs": "Enable Playoffs",
     "playersAdvancingPerGroup": "Players advancing per group",
@@ -166,7 +167,14 @@
     "headToHead": "Head to Head",
     "moveUp": "Move Up",
     "moveDown": "Move Down",
-    "updateSettings": "Update Settings"
+    "updateSettings": "Update Settings",
+    "seedingMethod": "Seeding Method",
+    "seedingMethodStandard": "Standard Tournament Seeding",
+    "seedingMethodGroupBased": "Group-Based Seeding",
+    "groupMatchups": "Group Matchups",
+    "groupMatchupsDescription": "Configure which groups play against each other. 1st from Group A vs last advancing from Group D, 2nd from Group A vs second-to-last from Group D, etc.",
+    "groupMatchupsNote": "Note: Group matchups will be configured after groups are created during tournament start.",
+    "addGroupMatchup": "Add Group Matchup"
   },
   "management": {
     "tournamentGroups": "Tournament Groups",
@@ -279,6 +287,9 @@
     "confirmYourPassword": "Confirm your password",
     "signIn": "Sign In",
     "signUp": "Sign Up",
+    "or": "or",
+    "continueWithGoogle": "Continue with Google",
+    "redirectingToGoogle": "Redirecting to Google...",
     "forgotPassword": "Forgot Password?",
     "dontHaveAccount": "Don't have an account?",
     "alreadyHaveAccount": "Already have an account?",

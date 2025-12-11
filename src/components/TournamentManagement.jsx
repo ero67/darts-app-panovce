@@ -53,6 +53,15 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       return true;
     });
   }, [tournament?.groups]);
+
+  // Fast lookup sets for current tournament scope
+  const tournamentGroupIds = useMemo(() => new Set(uniqueGroups?.map(g => g.id) || []), [uniqueGroups]);
+  const tournamentPlayoffIds = useMemo(() => new Set(tournament.playoffMatches?.map(m => m.id) || []), [tournament.playoffMatches]);
+  const hasTournamentStarted = useMemo(() => {
+    const groupMatches = uniqueGroups?.flatMap(g => g.matches || []) || [];
+    const playoffMatches = tournament.playoffMatches || [];
+    return [...groupMatches, ...playoffMatches].some(m => m?.status && m.status !== 'pending');
+  }, [uniqueGroups, tournament.playoffMatches]);
   
   // Update URL when tab changes
   const handleTabChange = (tab) => {
@@ -78,7 +87,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
-  
+
   // Sync ref with state whenever state changes
   useEffect(() => {
     liveMatchesRef.current = liveMatches;
@@ -107,6 +116,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
         return {
           ...existing,
           legsToWinByRound: {
+            32: existing.playoffLegsToWin,
             16: existing.playoffLegsToWin,
             8: existing.playoffLegsToWin,
             4: existing.playoffLegsToWin,
@@ -118,12 +128,15 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       return {
         enabled: false,
         playersPerGroup: 1,
-        legsToWinByRound: {
-          16: 3,  // Round of 16
-          8: 3,   // Quarter-finals
-          4: 3,   // Semi-finals
-          2: 3    // Final
-        }
+        seedingMethod: tournament.playoffSettings?.seedingMethod || 'standard',
+        groupMatchups: tournament.playoffSettings?.groupMatchups || [],
+          legsToWinByRound: {
+            32: 3,  // Round of 32
+            16: 3,  // Round of 16
+            8: 3,   // Quarter-finals
+            4: 3,   // Semi-finals
+            2: 3    // Final
+          }
       };
     })()
   });
@@ -165,12 +178,13 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             qualificationMode: 'perGroup', // 'perGroup' or 'totalPlayers'
             playersPerGroup: 1,
             totalPlayersToAdvance: 8,
-            legsToWinByRound: {
-              16: 3,  // Round of 16
-              8: 3,   // Quarter-finals
-              4: 3,   // Semi-finals
-              2: 3    // Final
-            }
+          legsToWinByRound: {
+            32: 3,  // Round of 32
+            16: 3,  // Round of 16
+            8: 3,   // Quarter-finals
+            4: 3,   // Semi-finals
+            2: 3    // Final
+          }
           };
         })()
       });
@@ -393,6 +407,146 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     return rounds;
   }, []);
 
+  // Seed first round using standard tournament seeding or group-based seeding
+  const seedFirstRound = useCallback((qualifyingPlayers, firstRound, tournament) => {
+    if (!firstRound || !firstRound.matches || qualifyingPlayers.length === 0) {
+      return firstRound;
+    }
+    
+    const numMatches = firstRound.matches.length;
+    const totalPlayers = qualifyingPlayers.length;
+    const seedingMethod = tournament?.playoffSettings?.seedingMethod || 'standard';
+    
+    // Group-based seeding
+    if (seedingMethod === 'groupBased' && tournament?.groups && tournament?.playoffSettings?.groupMatchups) {
+      const groupMatchups = tournament.playoffSettings.groupMatchups;
+      const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 1;
+      
+      // Get players organized by group
+      const playersByGroup = {};
+      tournament.groups.forEach(group => {
+        if (group.standings && group.standings.length > 0) {
+          const sortedStandings = [...group.standings].sort((a, b) => {
+            // Use tournament's standings criteria order
+            const criteriaOrder = tournament.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'];
+            for (const criterion of criteriaOrder) {
+              let comparison = 0;
+              switch (criterion) {
+                case 'matchesWon':
+                  comparison = b.matchesWon - a.matchesWon;
+                  break;
+                case 'legDifference':
+                  const legDiffA = a.legsWon - a.legsLost;
+                  const legDiffB = b.legsWon - b.legsLost;
+                  comparison = legDiffB - legDiffA;
+                  break;
+                case 'average':
+                  comparison = (b.average || 0) - (a.average || 0);
+                  break;
+                case 'headToHead':
+                  const aWinsVsB = a.headToHeadWins?.[b.player.id] || 0;
+                  const bWinsVsA = b.headToHeadWins?.[a.player.id] || 0;
+                  comparison = bWinsVsA - aWinsVsB;
+                  break;
+              }
+              if (comparison !== 0) return comparison;
+            }
+            return 0;
+          });
+          
+          // Take top N players from this group
+          const topPlayers = sortedStandings.slice(0, playersPerGroup).map(s => s.player);
+          playersByGroup[group.name] = topPlayers;
+        }
+      });
+      
+      // Create matches based on group matchups
+      let matchIndex = 0;
+      groupMatchups.forEach(matchup => {
+        const group1Players = playersByGroup[matchup.group1] || [];
+        const group2Players = playersByGroup[matchup.group2] || [];
+        
+        // Pair players: 1st from Group A vs last from Group D, 2nd from Group A vs second-to-last from Group D, etc.
+        const maxPlayers = Math.min(group1Players.length, group2Players.length);
+        
+        for (let i = 0; i < maxPlayers && matchIndex < numMatches; i++) {
+          const match = firstRound.matches[matchIndex];
+          // Group 1: position i (0 = 1st, 1 = 2nd, etc.)
+          // Group 2: position (maxPlayers - 1 - i) (last, second-to-last, etc.)
+          const player1 = group1Players[i];
+          const player2 = group2Players[maxPlayers - 1 - i];
+          
+          if (player1 && player2) {
+            match.player1 = player1;
+            match.player2 = player2;
+            match.status = 'pending';
+            matchIndex++;
+          }
+        }
+      });
+      
+      return firstRound;
+    }
+    
+    // Standard tournament bracket seeding (default)
+    // Standard bracket seeding pattern:
+    // For 16 players: 1v16, 8v9, 4v13, 5v12, 2v15, 7v10, 3v14, 6v11
+    // Algorithm: Recursively place seeds in bracket positions using standard tournament structure
+    const generateBracketPositions = (n) => {
+      // Ensure we work with the nearest power of two to avoid infinite recursion on odd sizes
+      const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(1, n))));
+
+      const helper = (size) => {
+        if (size === 1) return [1];
+        if (size === 2) return [1, 2];
+
+        const result = [];
+        const half = size / 2;
+        const topHalf = helper(half);
+        const bottomHalf = helper(half);
+
+        for (let i = 0; i < half; i++) {
+          result.push(topHalf[i]);
+          result.push(bottomHalf[i] + half);
+        }
+
+        return result;
+      };
+
+      return helper(bracketSize);
+    };
+    
+    // Generate bracket positions (these are the seed numbers in bracket order)
+    const bracketPositions = generateBracketPositions(totalPlayers);
+    
+    // Create pairs: position 0 with position N-1, position 1 with position N-2, etc.
+    const pairs = [];
+    for (let i = 0; i < numMatches; i++) {
+      const pos1 = bracketPositions[i];
+      const pos2 = bracketPositions[totalPlayers - 1 - i];
+      pairs.push([pos1, pos2]);
+    }
+    
+    // Assign players to matches
+    for (let i = 0; i < numMatches && i < pairs.length; i++) {
+      const match = firstRound.matches[i];
+      const [seed1, seed2] = pairs[i];
+      
+      // Ensure seeds are valid
+      if (seed1 >= 1 && seed1 <= totalPlayers && 
+          seed2 >= 1 && seed2 <= totalPlayers && 
+          seed1 !== seed2) {
+        match.player1 = qualifyingPlayers[seed1 - 1] || null; // Seed 1 = index 0
+        match.player2 = qualifyingPlayers[seed2 - 1] || null;
+        match.seed1 = seed1;
+        match.seed2 = seed2;
+        match.status = 'pending';
+      }
+    }
+    
+    return firstRound;
+  }, []);
+
   // Populate playoff bracket with qualifying players using proper seeding
   // Seeding: Best vs Worst, 2nd best vs 2nd worst, etc.
   const populatePlayoffBracket = useCallback((qualifyingPlayers, rounds) => {
@@ -404,10 +558,20 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     
     const updatedRounds = [...rounds];
     
-    // Don't automatically populate players - let user choose via Edit button
-    // Just ensure all matches have status 'pending' and no players assigned
-    updatedRounds.forEach(round => {
-      round.matches.forEach(match => {
+    // Automatically seed the first round
+    if (updatedRounds.length > 0 && qualifyingPlayers.length > 0) {
+      const firstRound = updatedRounds[0];
+      // Only seed if first round matches don't have players assigned
+      const needsSeeding = firstRound.matches.every(match => !match.player1 && !match.player2);
+      
+      if (needsSeeding) {
+        updatedRounds[0] = seedFirstRound(qualifyingPlayers, firstRound, tournament);
+      }
+    }
+    
+    // Ensure all other rounds have proper status
+    for (let i = 1; i < updatedRounds.length; i++) {
+      updatedRounds[i].matches.forEach(match => {
         // Only reset if match doesn't already have players (preserve existing assignments)
         if (!match.player1 && !match.player2) {
           match.player1 = null;
@@ -415,11 +579,10 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           match.status = 'pending';
         }
       });
-    });
-    
+    }
     
     return updatedRounds;
-  }, [generatePlayoffRounds]);
+  }, [generatePlayoffRounds, seedFirstRound]);
 
   // Note: Removed automatic playoff player assignment - playoffs should only start when user clicks button
 
@@ -850,20 +1013,14 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                           </span>
                           <span className="score">{match.result.player1Legs}</span>
                         </div>
-                        <div className="player-average-compact">
-                          {match.result.player1Stats?.average ? match.result.player1Stats.average.toFixed(1) : '0.0'}
-                        </div>
                       </div>
                       <div className="score-divider">:</div>
                       <div className="player-result">
                         <div className="player-name-row">
-                          <span className="score">{match.result.player2Legs}</span>
                           <span className={`player-name ${isPlayer2Winner ? 'winner' : ''}`}>
                             {match.player2?.name || 'Unknown Player'}
                           </span>
-                        </div>
-                        <div className="player-average-compact">
-                          {match.result.player2Stats?.average ? match.result.player2Stats.average.toFixed(1) : '0.0'}
+                          <span className="score">{match.result.player2Legs}</span>
                         </div>
                       </div>
                     </div>
@@ -1337,14 +1494,25 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     }
 
     let isMounted = true;
+    // Reset previously viewed tournament live matches to avoid cross-tournament bleed
+    setLiveMatches([]);
+    liveMatchesRef.current = [];
 
     const loadLiveMatches = async () => {
       try {
         // Get all group IDs for this tournament
         const groupIds = uniqueGroups?.map(g => g.id) || [];
+        const groupIdSet = new Set(groupIds);
         
         // Get playoff matches for this tournament
         const playoffMatchIds = tournament.playoffMatches?.map(m => m.id) || [];
+        const playoffIdSet = new Set(playoffMatchIds);
+
+        // Helper to ensure we only keep matches belonging to this tournament
+        const belongsToThisTournament = (match) => {
+          const matchGroupId = match.group_id || match.group?.id;
+          return groupIdSet.has(matchGroupId) || playoffIdSet.has(match.id);
+        };
         
         const allLiveMatches = [];
 
@@ -1406,7 +1574,8 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
         setLiveMatches(prev => {
           // Always use ref first to get the most current matches (prev might be stale in async context)
           // This ensures we never lose existing matches during async operations
-          const currentMatches = liveMatchesRef.current.length > 0 ? liveMatchesRef.current : prev;
+          const currentMatches = (liveMatchesRef.current.length > 0 ? liveMatchesRef.current : prev)
+            .filter(belongsToThisTournament); // Drop matches from other tournaments
           
           // Create a map of new matches by ID for quick lookup
           const newMatchesMap = new Map(allLiveMatches.map(m => [m.id, m]));
@@ -1421,12 +1590,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             }
             // Return updated match if available, otherwise keep existing (preserves card)
             return newMatch || existingMatch;
-          }).filter(m => m !== null && m.status === 'in_progress'); // Only keep live matches
+          }).filter(m => m !== null && m.status === 'in_progress' && belongsToThisTournament(m)); // Only keep live matches from this tournament
           
           // Add any new matches that weren't in the previous list
           const existingIds = new Set(currentMatches.map(m => m.id));
           allLiveMatches.forEach(newMatch => {
-            if (!existingIds.has(newMatch.id) && newMatch.status === 'in_progress') {
+            if (!existingIds.has(newMatch.id) && newMatch.status === 'in_progress' && belongsToThisTournament(newMatch)) {
               mergedMatches.push(newMatch);
             }
           });
@@ -1564,6 +1733,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   }, [tournament?.id]); // Only depend on tournament ID to avoid unnecessary reloads
 
   const renderLiveMatches = () => {
+    const belongsToThisTournament = (match) => {
+      const matchGroupId = match.group_id || match.group?.id;
+      return tournamentGroupIds.has(matchGroupId) || tournamentPlayoffIds.has(match.id);
+    };
+    const filteredLiveMatches = liveMatches.filter(belongsToThisTournament);
+
     const formatTimeAgo = (timestamp) => {
       if (!timestamp) return 'Unknown';
       const now = new Date();
@@ -1587,11 +1762,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             {t('management.liveMatches') || 'Live Matches'}
           </h3>
           <p className="live-matches-count">
-            {liveMatches.length} match{liveMatches.length !== 1 ? 'es' : ''} currently in progress
+            {filteredLiveMatches.length} match{filteredLiveMatches.length !== 1 ? 'es' : ''} currently in progress
           </p>
         </div>
 
-        {liveMatches.length === 0 ? (
+        {filteredLiveMatches.length === 0 ? (
           <div className="no-live-matches">
             <Activity size={48} className="no-matches-icon" />
             <h4>{t('management.noLiveMatches') || 'No Live Matches'}</h4>
@@ -1599,7 +1774,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           </div>
         ) : (
           <div className="live-matches-grid">
-            {liveMatches.map(match => (
+            {filteredLiveMatches.map(match => (
               <div key={match.id} className="live-match-card scoreboard-style">
                 <div className="scoreboard-header">
                   <div className="match-format">First to {match.legs_to_win || 3}</div>
@@ -2043,7 +2218,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
               {t('registration.editSettings')}
             </button>
           )}
-          {isAdmin && user && tournament.userId && user.id === tournament.userId && (
+          {isAdmin && user && (
             <button 
               className="delete-tournament-btn"
               onClick={handleDeleteTournament}
@@ -2220,6 +2395,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
               <div className="group-settings">
                 <h4>{t('registration.groupSettings')}</h4>
+                {hasTournamentStarted && (
+                  <p className="settings-description" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    {t('registration.groupSettingsLocked') || 'Group count is locked after matches have started.'}
+                  </p>
+                )}
                 <div className="radio-group">
                   <label>
                     <input
@@ -2227,6 +2407,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                       name="groupType"
                       value="groups"
                       checked={tournamentSettings.groupSettings.type === 'groups'}
+                      disabled={hasTournamentStarted}
                       onChange={(e) => setTournamentSettings({
                         ...tournamentSettings,
                         groupSettings: {
@@ -2243,6 +2424,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                       name="groupType"
                       value="playersPerGroup"
                       checked={tournamentSettings.groupSettings.type === 'playersPerGroup'}
+                      disabled={hasTournamentStarted}
                       onChange={(e) => setTournamentSettings({
                         ...tournamentSettings,
                         groupSettings: {
@@ -2263,6 +2445,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                     min="1"
                     max={tournamentSettings.groupSettings.type === 'groups' ? '16' : '8'}
                     value={tournamentSettings.groupSettings.value}
+                    disabled={hasTournamentStarted}
                     onChange={(e) => setTournamentSettings({
                       ...tournamentSettings,
                       groupSettings: {
@@ -2392,8 +2575,252 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                           </p>
                         </div>
                       )}
+                      
+                      <div className="input-group">
+                        <label>{t('registration.seedingMethod') || 'Seeding Method'}</label>
+                        <div className="radio-group">
+                          <label>
+                            <input
+                              type="radio"
+                              name="seedingMethod"
+                              value="standard"
+                              checked={tournamentSettings.playoffSettings.seedingMethod === 'standard'}
+                              onChange={(e) => setTournamentSettings({
+                                ...tournamentSettings,
+                                playoffSettings: {
+                                  ...tournamentSettings.playoffSettings,
+                                  seedingMethod: e.target.value
+                                }
+                              })}
+                            />
+                            {t('registration.seedingMethodStandard') || 'Standard Tournament Seeding'}
+                          </label>
+                          <label>
+                            <input
+                              type="radio"
+                              name="seedingMethod"
+                              value="groupBased"
+                              checked={tournamentSettings.playoffSettings.seedingMethod === 'groupBased'}
+                              onChange={(e) => setTournamentSettings({
+                                ...tournamentSettings,
+                                playoffSettings: {
+                                  ...tournamentSettings.playoffSettings,
+                                  seedingMethod: e.target.value
+                                }
+                              })}
+                            />
+                            {t('registration.seedingMethodGroupBased') || 'Group-Based Seeding'}
+                          </label>
+                        </div>
+                      </div>
+
+                      {tournamentSettings.playoffSettings.seedingMethod === 'groupBased' && (
+                        <div className="input-group">
+                          <label>{t('registration.groupMatchups') || 'Group Matchups'}</label>
+                          {tournament?.groups && tournament.groups.length > 0 ? (
+                            <>
+                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                                {t('registration.groupMatchupsDescription') || 'Configure which groups play against each other. 1st from Group A vs last advancing from Group D, etc.'}
+                              </p>
+                          <div className="group-matchups-config" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {(() => {
+                              const groups = tournament.groups || [];
+                              const matchups = tournamentSettings.playoffSettings.groupMatchups || [];
+                              
+                              // Initialize matchups if empty
+                              if (matchups.length === 0 && groups.length >= 2) {
+                                const defaultMatchups = [];
+                                for (let i = 0; i < Math.floor(groups.length / 2); i++) {
+                                  const group1Index = i;
+                                  const group2Index = groups.length - 1 - i;
+                                  defaultMatchups.push({
+                                    group1: groups[group1Index]?.name || `Group ${String.fromCharCode(65 + group1Index)}`,
+                                    group2: groups[group2Index]?.name || `Group ${String.fromCharCode(65 + group2Index)}`
+                                  });
+                                }
+                                setTimeout(() => {
+                                  setTournamentSettings({
+                                    ...tournamentSettings,
+                                    playoffSettings: {
+                                      ...tournamentSettings.playoffSettings,
+                                      groupMatchups: defaultMatchups
+                                    }
+                                  });
+                                }, 0);
+                                return null;
+                              }
+                              
+                              return matchups.map((matchup, index) => {
+                                const availableGroups = groups.map(g => g.name);
+                                return (
+                                  <div key={index} style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.5rem',
+                                    padding: '0.75rem',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'var(--bg-tertiary)'
+                                  }}>
+                                    <select
+                                      value={matchup.group1}
+                                      onChange={(e) => {
+                                        const newMatchups = [...matchups];
+                                        newMatchups[index].group1 = e.target.value;
+                                        setTournamentSettings({
+                                          ...tournamentSettings,
+                                          playoffSettings: {
+                                            ...tournamentSettings.playoffSettings,
+                                            groupMatchups: newMatchups
+                                          }
+                                        });
+                                      }}
+                                      style={{ 
+                                        flex: 1, 
+                                        padding: '0.5rem',
+                                        backgroundColor: 'var(--input-bg)',
+                                        color: 'var(--text-primary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '4px'
+                                      }}
+                                    >
+                                      {availableGroups.map(groupName => (
+                                        <option key={groupName} value={groupName}>{groupName}</option>
+                                      ))}
+                                    </select>
+                                    <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>vs</span>
+                                    <select
+                                      value={matchup.group2}
+                                      onChange={(e) => {
+                                        const newMatchups = [...matchups];
+                                        newMatchups[index].group2 = e.target.value;
+                                        setTournamentSettings({
+                                          ...tournamentSettings,
+                                          playoffSettings: {
+                                            ...tournamentSettings.playoffSettings,
+                                            groupMatchups: newMatchups
+                                          }
+                                        });
+                                      }}
+                                      style={{ 
+                                        flex: 1, 
+                                        padding: '0.5rem',
+                                        backgroundColor: 'var(--input-bg)',
+                                        color: 'var(--text-primary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '4px'
+                                      }}
+                                    >
+                                      {availableGroups.map(groupName => (
+                                        <option key={groupName} value={groupName}>{groupName}</option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newMatchups = matchups.filter((_, i) => i !== index);
+                                        setTournamentSettings({
+                                          ...tournamentSettings,
+                                          playoffSettings: {
+                                            ...tournamentSettings.playoffSettings,
+                                            groupMatchups: newMatchups
+                                          }
+                                        });
+                                      }}
+                                      style={{ 
+                                        padding: '0.25rem 0.5rem',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'var(--card-bg)',
+                                        color: 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease'
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.target.style.backgroundColor = 'var(--bg-tertiary)';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.target.style.backgroundColor = 'var(--card-bg)';
+                                      }}
+                                    >
+                                      <X size={16} />
+                                    </button>
+                                  </div>
+                                );
+                              });
+                            })()}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const groups = tournament.groups || [];
+                                const availableGroups = groups.map(g => g.name);
+                                if (availableGroups.length >= 2) {
+                                  const newMatchups = [
+                                    ...(tournamentSettings.playoffSettings.groupMatchups || []),
+                                    { group1: availableGroups[0], group2: availableGroups[1] }
+                                  ];
+                                  setTournamentSettings({
+                                    ...tournamentSettings,
+                                    playoffSettings: {
+                                      ...tournamentSettings.playoffSettings,
+                                      groupMatchups: newMatchups
+                                    }
+                                  });
+                                }
+                              }}
+                              style={{
+                                padding: '0.5rem',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '4px',
+                                backgroundColor: 'var(--card-bg)',
+                                color: 'var(--text-primary)',
+                                cursor: 'pointer',
+                                alignSelf: 'flex-start',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.backgroundColor = 'var(--bg-tertiary)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.backgroundColor = 'var(--card-bg)';
+                              }}
+                            >
+                              {t('registration.addGroupMatchup') || '+ Add Group Matchup'}
+                            </button>
+                          </div>
+                            </>
+                          ) : (
+                            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontStyle: 'italic', padding: '0.75rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                              {t('registration.groupMatchupsNote') || 'Note: Groups must be created first (start the tournament) before you can configure group matchups.'}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      
                     <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
+                      <div className="input-group">
+                        <label>{t('management.roundOf', { count: 32 })}:</label>
+                        <select 
+                          value={tournamentSettings.playoffSettings.legsToWinByRound?.[32] || 3}
+                          onChange={(e) => setTournamentSettings({
+                            ...tournamentSettings,
+                            playoffSettings: {
+                              ...tournamentSettings.playoffSettings,
+                              legsToWinByRound: {
+                                ...tournamentSettings.playoffSettings.legsToWinByRound,
+                                32: parseInt(e.target.value)
+                              }
+                            }
+                          })}
+                        >
+                          <option value={1}>{t('tournaments.firstToLeg', { count: 1 })}</option>
+                          <option value={2}>{t('tournaments.firstToLegs', { count: 2 })}</option>
+                          <option value={3}>{t('tournaments.firstToLegs', { count: 3 })}</option>
+                          <option value={5}>{t('tournaments.firstToLegs', { count: 5 })}</option>
+                          <option value={7}>{t('tournaments.firstToLegs', { count: 7 })}</option>
+                        </select>
+                      </div>
                       <div className="input-group">
                         <label>{t('management.top16')}:</label>
                         <select 

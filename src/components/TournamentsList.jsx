@@ -9,7 +9,7 @@ export function TournamentsList({ tournaments, onCreateTournament, onSelectTourn
   const { user } = useAuth();
   const [filter, setFilter] = useState('all'); // 'all', 'active', 'completed'
   const [sortBy, setSortBy] = useState('updated'); // 'updated', 'created', 'name'
-  const { isAdmin } = useAdmin();
+  const { isAdmin, canCreateTournaments } = useAdmin();
 
   const filteredTournaments = tournaments.filter(tournament => {
     if (filter === 'all') return true;
@@ -40,7 +40,7 @@ export function TournamentsList({ tournaments, onCreateTournament, onSelectTourn
     <div className="tournaments-list">
       <div className="list-header">
         <h1>{t('tournaments.title')}</h1>
-        {user && (
+        {user && canCreateTournaments && (
           <button className="create-tournament-btn" onClick={onCreateTournament}>
             <Plus size={20} />
             {t('tournaments.create')}
@@ -109,11 +109,11 @@ export function TournamentsList({ tournaments, onCreateTournament, onSelectTourn
                       <Play size={16} />
                     </button>
                   )}
-                  {isAdmin && isOwner && (
+                  {isAdmin && (
                     <button 
                       className="action-btn delete"
                       onClick={() => onDeleteTournament(tournament.id)}
-                      title="Delete Tournament"
+                      title="Delete Tournament (Admin)"
                     >
                       <Trash2 size={16} />
                     </button>

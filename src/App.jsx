@@ -4,7 +4,7 @@ import { Menu } from 'lucide-react';
 import { TournamentProvider, useTournament } from './contexts/TournamentContext';
 import { LiveMatchProvider } from './contexts/LiveMatchContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { AdminProvider } from './contexts/AdminContext';
+import { AdminProvider, useAdmin } from './contexts/AdminContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { Navigation } from './components/Navigation';
@@ -15,10 +15,13 @@ import { TournamentManagement } from './components/TournamentManagement';
 import { TournamentRegistration } from './components/TournamentRegistration';
 import { MatchInterface } from './components/MatchInterface';
 import { Auth } from './components/Auth';
+import { PrivacyPolicy } from './components/PrivacyPolicy';
+import { AdminPanel } from './components/AdminPanel';
 import './App.css';
 
 function AppContent() {
   const { user, loading } = useAuth();
+  const { isAdmin, canCreateTournaments } = useAdmin();
   const {
     tournaments,
     currentTournament,
@@ -47,6 +50,17 @@ function AppContent() {
   
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Clear current tournament when navigating away from tournament routes
+  useEffect(() => {
+    const isTournamentRoute = location.pathname.startsWith('/tournament/');
+    const isMatchRoute = location.pathname.startsWith('/match/');
+    
+    if (!isTournamentRoute && !isMatchRoute && currentTournament) {
+      // Clear tournament when navigating to non-tournament routes
+      selectTournament(null);
+    }
+  }, [location.pathname, currentTournament, selectTournament]);
 
   // Component to handle tournament loading
   const TournamentRoute = () => {
@@ -265,14 +279,31 @@ function AppContent() {
             />
           } />
           <Route path="/login" element={<Auth />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/create-tournament" element={
-            user ? (
+            user && canCreateTournaments ? (
               <TournamentCreation 
                 onTournamentCreated={handleTournamentCreated}
                 onBack={() => navigate('/')}
               />
+            ) : user ? (
+              <div className="unauthorized-container">
+                <h2>Access Restricted</h2>
+                <p>Only managers and administrators can create tournaments.</p>
+                <p>Please contact an administrator to request manager permissions.</p>
+              </div>
             ) : (
               <Auth />
+            )
+          } />
+          <Route path="/admin" element={
+            isAdmin ? (
+              <AdminPanel />
+            ) : (
+              <div className="unauthorized-container">
+                <h2>Access Denied</h2>
+                <p>You must be an administrator to access this page.</p>
+              </div>
             )
           } />
           <Route path="/tournament/:id" element={<TournamentRoute />} />

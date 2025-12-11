@@ -2,10 +2,12 @@ import React from 'react';
 import { Plus, Trophy, Users, Target, Calendar, TrendingUp } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useAdmin } from '../contexts/AdminContext';
 
 export function Dashboard({ tournaments, onCreateTournament, onSelectTournament }) {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const { canCreateTournaments } = useAdmin();
   const activeTournaments = tournaments.filter(t => t.status === 'active');
   const completedTournaments = tournaments.filter(t => t.status === 'completed');
   
@@ -22,7 +24,7 @@ export function Dashboard({ tournaments, onCreateTournament, onSelectTournament 
     <div className="dashboard">
       <div className="dashboard-header">
         <h1>{t('dashboard.title')}</h1>
-        {user && (
+        {user && canCreateTournaments && (
           <button className="create-tournament-btn" onClick={onCreateTournament}>
             <Plus size={20} />
             {t('tournaments.create')}

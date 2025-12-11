@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User, Trophy } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useLanguage } from '../contexts/LanguageContext';
+import logo from '../assets/logo.png';
 
 export function Auth() {
   const { t } = useLanguage();
@@ -20,7 +21,7 @@ export function Auth() {
     fullName: '',
   });
 
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { signIn, signUp, resetPassword, signInWithGoogle } = useAuth();
 
   const handleInputChange = (e) => {
     setFormData({
@@ -77,6 +78,23 @@ export function Auth() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const { error } = await signInWithGoogle();
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+      }
+    } catch (err) {
+      setError(t('auth.unexpectedError'));
+      setLoading(false);
+    }
+  };
+
   const handleForgotPassword = async () => {
     if (!formData.email) {
       setError(t('auth.enterEmailFirst'));
@@ -105,14 +123,9 @@ export function Auth() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <Trophy className="auth-icon" />
-          <h1>{t('auth.appTitle')}</h1>
+          <img src={logo} alt="DartLead" className="auth-icon" />
+          <h1>DartLead</h1>
           <p>{t('auth.signInAsAdmin', { action: isLogin ? t('auth.in') : t('auth.up') })}</p>
-          <div className="auth-info">
-            <p>• {t('auth.continueInterruptedMatches')}</p>
-            <p>• {t('auth.adminControlsForCorrections')}</p>
-            <p>• {t('auth.tournamentManagement')}</p>
-          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
@@ -213,6 +226,22 @@ export function Auth() {
             </button>
           )}
         </form>
+
+        <div className="auth-divider">
+          <span>{t('auth.or')}</span>
+        </div>
+
+        <div className="social-login">
+          <button
+            type="button"
+            className="auth-button google-button"
+            onClick={handleGoogleSignIn}
+            disabled={loading}
+          >
+            <span className="google-icon">G</span>
+            {loading ? t('auth.redirectingToGoogle') : t('auth.continueWithGoogle')}
+          </button>
+        </div>
 
         <div className="auth-footer">
           <p>

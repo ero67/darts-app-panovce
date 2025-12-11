@@ -299,6 +299,17 @@ export const tournamentService = {
         })
       }
 
+      // Parse group_settings if it's a string (JSONB from Supabase might be string)
+      let groupSettings = tournament.group_settings;
+      if (typeof groupSettings === 'string') {
+        try {
+          groupSettings = JSON.parse(groupSettings);
+        } catch (e) {
+          console.error('Error parsing group_settings:', e);
+          groupSettings = {};
+        }
+      }
+
       return {
         ...tournament,
         id: tournament.id,
@@ -306,12 +317,14 @@ export const tournamentService = {
         status: tournament.status,
         legsToWin: tournament.legs_to_win,
         startingScore: tournament.starting_score,
-        groupSettings: tournament.group_settings || {
+        groupSettings: groupSettings || {
+          type: 'groups',
+          value: 2,
           standingsCriteriaOrder: tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead']
         },
         playoffSettings: tournament.playoff_settings,
         playoffs: tournament.playoffs,
-        standingsCriteriaOrder: tournament.group_settings?.standingsCriteriaOrder || tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+        standingsCriteriaOrder: groupSettings?.standingsCriteriaOrder || tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
         createdAt: tournament.created_at,
         updatedAt: tournament.updated_at,
         players: tournamentData.players.map(player => ({
@@ -739,6 +752,11 @@ export const tournamentService = {
           status: tournament.status,
           legsToWin: tournament.legs_to_win,
           startingScore: tournament.starting_score,
+          groupSettings: groupSettings || {
+            type: 'groups',
+            value: 2,
+            standingsCriteriaOrder: ['matchesWon', 'legDifference', 'average', 'headToHead']
+          },
           playoffSettings: tournament.playoff_settings,
           playoffs: tournament.playoffs,
           playoffMatches: playoffMatches,
@@ -1219,7 +1237,16 @@ export const tournamentService = {
       console.log('Current user ID:', user?.id);
       console.log('Tournament user_id:', existingTournament.user_id);
       
-      if (user && existingTournament.user_id && user.id !== existingTournament.user_id) {
+      // Check if user is admin
+      const isAdmin = !!(
+        user?.user_metadata?.role === 'admin' ||
+        user?.app_metadata?.role === 'admin' ||
+        user?.raw_user_meta_data?.role === 'admin' ||
+        user?.raw_app_meta_data?.role === 'admin'
+      );
+      
+      // Allow deletion if user is admin OR if user owns the tournament
+      if (user && existingTournament.user_id && user.id !== existingTournament.user_id && !isAdmin) {
         throw new Error(`Permission denied: You can only delete tournaments you created. Tournament belongs to user ${existingTournament.user_id}, but you are ${user.id}`);
       }
 
