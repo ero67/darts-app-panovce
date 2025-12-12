@@ -17,15 +17,21 @@ export function AdminPanel() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   
   // Reset Match to Pending
-  const [matchId, setMatchId] = useState('');
+  const [tournamentsForMatch, setTournamentsForMatch] = useState([]);
+  const [selectedTournamentForMatch, setSelectedTournamentForMatch] = useState('');
+  const [matchesForTournament, setMatchesForTournament] = useState([]);
+  const [selectedMatchId, setSelectedMatchId] = useState('');
   const [matchInfo, setMatchInfo] = useState(null);
   const [loadingMatch, setLoadingMatch] = useState(false);
+  const [loadingMatches, setLoadingMatches] = useState(false);
   
   // Force Tournament Status
-  const [tournamentId, setTournamentId] = useState('');
+  const [tournamentsForStatus, setTournamentsForStatus] = useState([]);
+  const [selectedTournamentForStatus, setSelectedTournamentForStatus] = useState('');
   const [tournamentInfo, setTournamentInfo] = useState(null);
   const [newStatus, setNewStatus] = useState('active');
   const [loadingTournament, setLoadingTournament] = useState(false);
+  const [loadingTournaments, setLoadingTournaments] = useState(false);
 
   const setManagerRole = async () => {
     if (!email.trim()) {
@@ -157,15 +163,138 @@ export function AdminPanel() {
     }
   };
 
-  // Search for match by ID
-  const searchMatch = async () => {
-    if (!matchId.trim()) {
-      setMessage({ type: 'error', text: 'Please enter a match ID' });
+  // Load tournaments for match reset
+  const loadTournamentsForMatch = async () => {
+    setLoadingTournaments(true);
+    try {
+      const tournaments = await tournamentService.getTournaments();
+      setTournamentsForMatch(tournaments || []);
+    } catch (err) {
+      console.error('Error loading tournaments:', err);
+      setMessage({ 
+        type: 'error', 
+        text: 'Failed to load tournaments.' 
+      });
+    } finally {
+      setLoadingTournaments(false);
+    }
+  };
+
+  // Load matches for selected tournament (non-pending only)
+  const loadMatchesForTournament = async (tournamentId) => {
+    if (!tournamentId) {
+      setMatchesForTournament([]);
+      setSelectedMatchId('');
+      setMatchInfo(null);
       return;
     }
 
+    setLoadingMatches(true);
+    try {
+      // Get groups for this tournament
+      const { data: groups, error: groupsError } = await supabase
+        .from('groups')
+        .select('id')
+        .eq('tournament_id', tournamentId);
+
+      if (groupsError) throw groupsError;
+
+      const groupIds = groups?.map(g => g.id) || [];
+
+      // Get non-pending matches (both group and playoff matches)
+      const queries = [];
+
+      // Group matches
+      if (groupIds.length > 0) {
+        queries.push(
+          supabase
+            .from('matches')
+            .select(`
+              id,
+              status,
+              player1_id,
+              player2_id,
+              player1_legs,
+              player2_legs,
+              tournament_id,
+              group_id,
+              is_playoff,
+              created_at,
+              updated_at,
+              player1:players!matches_player1_id_fkey(name),
+              player2:players!matches_player2_id_fkey(name),
+              group:groups(name)
+            `)
+            .in('group_id', groupIds)
+            .neq('status', 'pending')
+        );
+      }
+
+      // Playoff matches
+      queries.push(
+        supabase
+          .from('matches')
+          .select(`
+            id,
+            status,
+            player1_id,
+            player2_id,
+            player1_legs,
+            player2_legs,
+            tournament_id,
+            group_id,
+            is_playoff,
+            created_at,
+            updated_at,
+            player1:players!matches_player1_id_fkey(name),
+            player2:players!matches_player2_id_fkey(name)
+          `)
+          .eq('tournament_id', tournamentId)
+          .eq('is_playoff', true)
+          .neq('status', 'pending')
+      );
+
+      const results = await Promise.all(queries);
+      const allMatches = [];
+      
+      results.forEach(({ data, error }) => {
+        if (error) {
+          console.error('Error loading matches:', error);
+        } else if (data) {
+          allMatches.push(...data);
+        }
+      });
+
+      setMatchesForTournament(allMatches);
+      setSelectedMatchId('');
+      setMatchInfo(null);
+    } catch (err) {
+      console.error('Error loading matches:', err);
+      setMessage({ 
+        type: 'error', 
+        text: err.message || 'Failed to load matches.' 
+      });
+      setMatchesForTournament([]);
+    } finally {
+      setLoadingMatches(false);
+    }
+  };
+
+  // Handle tournament selection for match reset
+  const handleTournamentSelectForMatch = async (tournamentId) => {
+    setSelectedTournamentForMatch(tournamentId);
+    await loadMatchesForTournament(tournamentId);
+  };
+
+  // Handle match selection
+  const handleMatchSelect = async (matchId) => {
+    if (!matchId) {
+      setMatchInfo(null);
+      return;
+    }
+
+    setSelectedMatchId(matchId);
     setLoadingMatch(true);
-    setMatchInfo(null);
     setMessage({ type: '', text: '' });
 
     try {
@@ -179,12 +308,16 @@ export function AdminPanel() {
           player1_legs,
           player2_legs,
           tournament_id,
+          group_id,
           is_playoff,
           created_at,
           updated_at,
+          player1:players!matches_player1_id_fkey(name),
+          player2:players!matches_player2_id_fkey(name),
+          group:groups(name),
           tournaments:tournament_id(name)
         `)
-        .eq('id', matchId.trim())
+        .eq('id', matchId)
         .maybeSingle();
 
       if (error) {
@@ -193,15 +326,17 @@ export function AdminPanel() {
 
       if (!data) {
         setMessage({ type: 'error', text: 'Match not found' });
+        setMatchInfo(null);
       } else {
         setMatchInfo(data);
       }
     } catch (err) {
-      console.error('Error searching match:', err);
+      console.error('Error loading match:', err);
       setMessage({ 
         type: 'error', 
-        text: err.message || 'Failed to search for match.' 
+        text: err.message || 'Failed to load match.' 
       });
+      setMatchInfo(null);
     } finally {
       setLoadingMatch(false);
     }
@@ -252,7 +387,9 @@ export function AdminPanel() {
         text: `Match ${matchInfo.id} has been reset to pending` 
       });
       setMatchInfo(null);
-      setMatchId('');
+      setSelectedMatchId('');
+      // Reload matches for the tournament
+      await loadMatchesForTournament(selectedTournamentForMatch);
     } catch (err) {
       console.error('Error resetting match:', err);
       setMessage({ 
@@ -264,19 +401,38 @@ export function AdminPanel() {
     }
   };
 
-  // Search for tournament by ID
-  const searchTournament = async () => {
-    if (!tournamentId.trim()) {
-      setMessage({ type: 'error', text: 'Please enter a tournament ID' });
+  // Load tournaments for status change
+  const loadTournamentsForStatus = async () => {
+    setLoadingTournaments(true);
+    try {
+      const tournaments = await tournamentService.getTournaments();
+      setTournamentsForStatus(tournaments || []);
+    } catch (err) {
+      console.error('Error loading tournaments:', err);
+      setMessage({ 
+        type: 'error', 
+        text: 'Failed to load tournaments.' 
+      });
+    } finally {
+      setLoadingTournaments(false);
+    }
+  };
+
+  // Handle tournament selection for status change
+  const handleTournamentSelectForStatus = async (tournamentId) => {
+    if (!tournamentId) {
+      setTournamentInfo(null);
+      setSelectedTournamentForStatus('');
       return;
     }
 
+    setSelectedTournamentForStatus(tournamentId);
     setLoadingTournament(true);
     setTournamentInfo(null);
     setMessage({ type: '', text: '' });
 
     try {
-      const tournament = await tournamentService.getTournament(tournamentId.trim());
+      const tournament = await tournamentService.getTournament(tournamentId);
       if (tournament) {
         setTournamentInfo(tournament);
         setNewStatus(tournament.status || 'active');
@@ -284,10 +440,10 @@ export function AdminPanel() {
         setMessage({ type: 'error', text: 'Tournament not found' });
       }
     } catch (err) {
-      console.error('Error searching tournament:', err);
+      console.error('Error loading tournament:', err);
       setMessage({ 
         type: 'error', 
-        text: err.message || 'Failed to search for tournament.' 
+        text: err.message || 'Failed to load tournament.' 
       });
     } finally {
       setLoadingTournament(false);
@@ -318,7 +474,9 @@ export function AdminPanel() {
         text: `Tournament status changed to ${newStatus}` 
       });
       setTournamentInfo(null);
-      setTournamentId('');
+      setSelectedTournamentForStatus('');
+      // Reload tournaments list
+      await loadTournamentsForStatus();
     } catch (err) {
       console.error('Error updating tournament status:', err);
       setMessage({ 
@@ -330,9 +488,11 @@ export function AdminPanel() {
     }
   };
 
-  // Load managers on mount
+  // Load managers and tournaments on mount
   React.useEffect(() => {
     loadManagers();
+    loadTournamentsForMatch();
+    loadTournamentsForStatus();
   }, []);
 
   return (
@@ -509,79 +669,111 @@ export function AdminPanel() {
             <h2>Reset Match to Pending</h2>
           </div>
           <p className="admin-section-description">
-            Search for a match by ID and reset it to pending status. This will clear all match data.
+            Select a tournament and then choose a non-pending match to reset it to pending status. This will clear all match data.
           </p>
 
           <div className="admin-form">
             <div className="form-group">
-              <label htmlFor="matchId">
+              <label htmlFor="tournamentForMatch">
                 <Search size={16} />
-                Match ID
+                Select Tournament
               </label>
-              <input
-                id="matchId"
-                type="text"
-                value={matchId}
-                onChange={(e) => setMatchId(e.target.value)}
-                placeholder="Enter match UUID"
-                onKeyPress={(e) => e.key === 'Enter' && !loadingMatch && searchMatch()}
-                disabled={loadingMatch}
-              />
+              <select
+                id="tournamentForMatch"
+                value={selectedTournamentForMatch}
+                onChange={(e) => handleTournamentSelectForMatch(e.target.value)}
+                disabled={loadingTournaments}
+              >
+                <option value="">-- Select a tournament --</option>
+                {tournamentsForMatch.map((tournament) => (
+                  <option key={tournament.id} value={tournament.id}>
+                    {tournament.name} ({tournament.status})
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <button
-              className="admin-button primary"
-              onClick={searchMatch}
-              disabled={loadingMatch || !matchId.trim()}
-            >
-              {loadingMatch ? (
-                <>
-                  <Loader size={16} className="spinning" />
-                  Searching...
-                </>
-              ) : (
-                <>
-                  <Search size={16} />
-                  Search Match
-                </>
-              )}
-            </button>
+            {selectedTournamentForMatch && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="matchSelect">
+                    <Search size={16} />
+                    Select Match
+                  </label>
+                  {loadingMatches ? (
+                    <div className="admin-loading">
+                      <Loader size={16} className="spinning" />
+                      <span>Loading matches...</span>
+                    </div>
+                  ) : (
+                    <select
+                      id="matchSelect"
+                      value={selectedMatchId}
+                      onChange={(e) => handleMatchSelect(e.target.value)}
+                      disabled={loadingMatch || matchesForTournament.length === 0}
+                    >
+                      <option value="">-- Select a match --</option>
+                      {matchesForTournament.map((match) => {
+                        const player1Name = match.player1?.name || 'Unknown';
+                        const player2Name = match.player2?.name || 'Unknown';
+                        const matchType = match.is_playoff ? 'Playoff' : (match.group?.name || 'Group');
+                        const score = match.player1_legs !== null ? `${match.player1_legs} - ${match.player2_legs}` : '';
+                        return (
+                          <option key={match.id} value={match.id}>
+                            {matchType}: {player1Name} vs {player2Name} {score && `(${score})`} - {match.status}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  )}
+                </div>
 
-            {matchInfo && (
-              <div className="match-info" style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
-                <div style={{ marginBottom: '0.5rem' }}>
-                  <strong>Tournament:</strong> {matchInfo.tournaments?.name || 'N/A'}
-                </div>
-                <div style={{ marginBottom: '0.5rem' }}>
-                  <strong>Status:</strong> <span className={`status-badge ${matchInfo.status}`}>{matchInfo.status}</span>
-                </div>
-                <div style={{ marginBottom: '0.5rem' }}>
-                  <strong>Type:</strong> {matchInfo.is_playoff ? 'Playoff' : 'Group'}
-                </div>
-                {matchInfo.player1_legs !== null && (
-                  <div style={{ marginBottom: '0.5rem' }}>
-                    <strong>Score:</strong> {matchInfo.player1_legs} - {matchInfo.player2_legs}
+                {matchesForTournament.length === 0 && !loadingMatches && (
+                  <div className="admin-empty" style={{ marginTop: '1rem' }}>
+                    <p>No non-pending matches found for this tournament.</p>
                   </div>
                 )}
-                <button
-                  className="admin-button danger"
-                  onClick={resetMatchToPending}
-                  disabled={loadingMatch || matchInfo.status === 'pending'}
-                  style={{ marginTop: '1rem', width: '100%' }}
-                >
-                  {loadingMatch ? (
-                    <>
-                      <Loader size={16} className="spinning" />
-                      Resetting...
-                    </>
-                  ) : (
-                    <>
-                      <RotateCcw size={16} />
-                      Reset to Pending
-                    </>
-                  )}
-                </button>
-              </div>
+
+                {matchInfo && (
+                  <div className="match-info" style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Tournament:</strong> {matchInfo.tournaments?.name || matchInfo.group?.tournament?.name || 'N/A'}
+                    </div>
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Match Type:</strong> {matchInfo.is_playoff ? 'Playoff' : (matchInfo.group?.name || 'Group')}
+                    </div>
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Players:</strong> {matchInfo.player1?.name || 'Unknown'} vs {matchInfo.player2?.name || 'Unknown'}
+                    </div>
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Status:</strong> <span className={`status-badge ${matchInfo.status}`}>{matchInfo.status}</span>
+                    </div>
+                    {matchInfo.player1_legs !== null && (
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <strong>Score:</strong> {matchInfo.player1_legs} - {matchInfo.player2_legs}
+                      </div>
+                    )}
+                    <button
+                      className="admin-button danger"
+                      onClick={resetMatchToPending}
+                      disabled={loadingMatch || matchInfo.status === 'pending'}
+                      style={{ marginTop: '1rem', width: '100%' }}
+                    >
+                      {loadingMatch ? (
+                        <>
+                          <Loader size={16} className="spinning" />
+                          Resetting...
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw size={16} />
+                          Reset to Pending
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -593,54 +785,50 @@ export function AdminPanel() {
             <h2>Force Tournament Status</h2>
           </div>
           <p className="admin-section-description">
-            Search for a tournament by ID and manually change its status.
+            Select a tournament from the list and manually change its status.
           </p>
 
           <div className="admin-form">
             <div className="form-group">
-              <label htmlFor="tournamentId">
+              <label htmlFor="tournamentForStatus">
                 <Search size={16} />
-                Tournament ID
+                Select Tournament
               </label>
-              <input
-                id="tournamentId"
-                type="text"
-                value={tournamentId}
-                onChange={(e) => setTournamentId(e.target.value)}
-                placeholder="Enter tournament UUID"
-                onKeyPress={(e) => e.key === 'Enter' && !loadingTournament && searchTournament()}
-                disabled={loadingTournament}
-              />
+              <select
+                id="tournamentForStatus"
+                value={selectedTournamentForStatus}
+                onChange={(e) => handleTournamentSelectForStatus(e.target.value)}
+                disabled={loadingTournaments || loadingTournament}
+              >
+                <option value="">-- Select a tournament --</option>
+                {tournamentsForStatus.map((tournament) => (
+                  <option key={tournament.id} value={tournament.id}>
+                    {tournament.name} ({tournament.status})
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <button
-              className="admin-button primary"
-              onClick={searchTournament}
-              disabled={loadingTournament || !tournamentId.trim()}
-            >
-              {loadingTournament ? (
-                <>
-                  <Loader size={16} className="spinning" />
-                  Searching...
-                </>
-              ) : (
-                <>
-                  <Search size={16} />
-                  Search Tournament
-                </>
-              )}
-            </button>
+            {loadingTournament && (
+              <div className="admin-loading">
+                <Loader size={16} className="spinning" />
+                <span>Loading tournament...</span>
+              </div>
+            )}
 
             {tournamentInfo && (
               <div style={{ marginTop: '1.5rem' }}>
                 <div className="form-group">
-                  <label htmlFor="newStatus">Current Status: <span className={`status-badge ${tournamentInfo.status}`}>{tournamentInfo.status}</span></label>
-                  <label htmlFor="newStatus" style={{ marginTop: '1rem' }}>New Status:</label>
+                  <label htmlFor="newStatus">
+                    Current Status: <span className={`status-badge ${tournamentInfo.status}`}>{tournamentInfo.status}</span>
+                  </label>
+                  <label htmlFor="newStatus" style={{ marginTop: '1rem', display: 'block' }}>
+                    New Status:
+                  </label>
                   <select
                     id="newStatus"
                     value={newStatus}
                     onChange={(e) => setNewStatus(e.target.value)}
-                    className="admin-form select"
                   >
                     <option value="open_for_registration">Open for Registration</option>
                     <option value="active">Active</option>

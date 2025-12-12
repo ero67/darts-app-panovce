@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings, Edit2, ChevronUp, ChevronDown, Clock, Activity, BarChart3, X, Search } from 'lucide-react';
+import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings, Edit2, ChevronUp, ChevronDown, Clock, Activity, BarChart3, X, Search, Grid3x3, List } from 'lucide-react';
 import { useLiveMatch } from '../contexts/LiveMatchContext';
 import { useAdmin } from '../contexts/AdminContext';
 import { useTournament } from '../contexts/TournamentContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { BracketVisualization } from './BracketVisualization';
 
   // Generate unique ID for playoff matches (using crypto.randomUUID for proper UUIDs)
   const generateId = () => {
@@ -40,6 +41,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   const activeTabRef = useRef(activeTab); // Track active tab for interval callback
   const [matchGroupFilter, setMatchGroupFilter] = useState('all'); // Filter by group
   const [matchPlayerFilter, setMatchPlayerFilter] = useState(''); // Filter by player name
+  const [bracketViewMode, setBracketViewMode] = useState('detailed'); // 'detailed' or 'compact'
   
   // Deduplicate groups - ensure each group appears only once
   const uniqueGroups = useMemo(() => {
@@ -2008,9 +2010,30 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             <span>{qualifyingPlayers.length} players qualified</span>
             <span>Current Round: {rounds[currentRound - 1]?.name || 'Completed'}</span>
           </div>
+          <div className="bracket-view-toggle">
+            <button
+              className={`view-toggle-btn ${bracketViewMode === 'detailed' ? 'active' : ''}`}
+              onClick={() => setBracketViewMode('detailed')}
+              title="Detailed View"
+            >
+              <List size={18} />
+              Detailed
+            </button>
+            <button
+              className={`view-toggle-btn ${bracketViewMode === 'compact' ? 'active' : ''}`}
+              onClick={() => setBracketViewMode('compact')}
+              title="Compact Bracket View"
+            >
+              <Grid3x3 size={18} />
+              Bracket
+            </button>
+          </div>
         </div>
 
-        <div className="bracket-container">
+        {bracketViewMode === 'compact' ? (
+          <BracketVisualization rounds={rounds} playoffMatches={playoffMatches} />
+        ) : (
+          <div className="bracket-container">
           {rounds.map((round, index) => (
             <div key={round.id} className={`bracket-round ${index + 1 === currentRound ? 'current' : ''}`}>
               <div className="round-header">
@@ -2071,25 +2094,33 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                         )}
                       </div>
                     </div>
-                    <div className="match-players">
-                      <div className={`player ${match.result?.winner === match.player1?.id ? 'winner' : ''}`}>
-                        <span className="player-name">
-                          {match.player1?.name || 'TBD'}
-                        </span>
-                        {match.result && (
-                          <span className="player-score">{match.result.player1Legs}</span>
-                        )}
+                    {match.status === 'completed' && match.result ? (
+                      <div className="match-result-compact">
+                        <div className="player-result">
+                          <div className="player-name-row">
+                            <span className={`player-name ${match.result?.winner === match.player1?.id ? 'winner' : ''}`}>
+                              {match.player1?.name || 'TBD'}
+                            </span>
+                            <span className="score">{match.result.player1Legs}</span>
+                          </div>
+                        </div>
+                        <div className="score-divider">:</div>
+                        <div className="player-result">
+                          <div className="player-name-row">
+                            <span className={`player-name ${match.result?.winner === match.player2?.id ? 'winner' : ''}`}>
+                              {match.player2?.name || 'TBD'}
+                            </span>
+                            <span className="score">{match.result.player2Legs}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="vs">vs</div>
-                      <div className={`player ${match.result?.winner === match.player2?.id ? 'winner' : ''}`}>
-                        <span className="player-name">
-                          {match.player2?.name || 'TBD'}
-                        </span>
-                        {match.result && (
-                          <span className="player-score">{match.result.player2Legs}</span>
-                        )}
+                    ) : (
+                      <div className="match-players-compact">
+                        <span className="player">{match.player1?.name || 'TBD'}</span>
+                        <span className="vs">vs</span>
+                        <span className="player">{match.player2?.name || 'TBD'}</span>
                       </div>
-                    </div>
+                    )}
                     
                     <div className="match-actions">
                       {match.status === 'pending' && match.player1 && match.player2 && !isMatchActuallyLive(match.id) && (
@@ -2183,6 +2214,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             </div>
           ))}
         </div>
+        )}
       </div>
     );
   };
