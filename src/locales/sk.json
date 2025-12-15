@@ -176,7 +176,12 @@
     "groupMatchups": "Párovanie Skupín",
     "groupMatchupsDescription": "Nastavte, ktoré skupiny hrajú proti sebe. 1. miesto zo Skupiny A vs posledné postupujúce miesto zo Skupiny D, 2. miesto zo Skupiny A vs predposledné zo Skupiny D, atď.",
     "groupMatchupsNote": "Poznámka: Párovanie skupín sa nastaví po vytvorení skupín pri spustení turnaja.",
-    "addGroupMatchup": "Pridať Párovanie Skupín"
+    "addGroupMatchup": "Pridať Párovanie Skupín",
+    "tournamentType": "Typ turnaja",
+    "tournamentTypeGroupsWithPlayoffs": "Skupinová fáza s voliteľným play-off",
+    "tournamentTypePlayoffOnly": "Len play-off (bez skupinovej fázy)",
+    "playoffStartStage": "Play-off začína od",
+    "playoffStartStageDescription": "Určuje, od ktorého kola začne vyraďovacia fáza."
   },
   "management": {
     "tournamentGroups": "Skupiny Turnaja",
@@ -218,6 +223,7 @@
     "quarterFinals": "Štvrťfinále",
     "thirdPlaceMatch": "Zápas o 3. miesto",
     "top16": "Osemfinále",
+    "top32": "Šestnásť finále",
     "roundOf": "{{count}} najlepších",
     "playoffsNotEnabled": "Play-off Nie Je Povolené",
     "tournamentWithoutPlayoffs": "Tento turnaj bol vytvorený bez povoleného play-off.",

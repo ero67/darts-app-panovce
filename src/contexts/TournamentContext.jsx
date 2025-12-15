@@ -162,6 +162,21 @@ function tournamentReducer(state, action) {
               }
             }
             
+            // Advance playoffs currentRound if all matches in the current round are completed
+            if (Array.isArray(rounds) && rounds.length > 0 && typeof currentRound === 'number') {
+              const currentRoundIndex = Math.max(0, Math.min(currentRound - 1, rounds.length - 1));
+              const currentRoundObj = rounds[currentRoundIndex];
+              if (currentRoundObj && currentRoundObj.matches?.length) {
+                const allCurrentRoundCompleted = currentRoundObj.matches
+                  .filter(m => !m.isThirdPlaceMatch) // ignore 3rd place when advancing rounds
+                  .every(m => m.status === 'completed');
+                if (allCurrentRoundCompleted && currentRound < rounds.length) {
+                  // Move to next round
+                  updatedTournament.playoffs.currentRound = currentRound + 1;
+                }
+              }
+            }
+            
             // Check if tournament is complete (final and 3rd place match are both finished)
             if (rounds.length > 0) {
               const finalRound = rounds[rounds.length - 1];

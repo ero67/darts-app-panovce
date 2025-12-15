@@ -144,7 +144,16 @@ export function TournamentRegistration({ tournament, onBack }) {
     }
 
     try {
-      await startTournament(tournamentSettings.groupSettings);
+      // For playoff-only tournaments, there is no group stage to generate
+      if (tournament.tournamentType === 'playoff_only') {
+        // Just mark tournament as started in DB via settings update
+        await updateTournamentSettings(tournament.id, {
+          ...tournamentSettings,
+          status: 'started'
+        });
+      } else {
+        await startTournament(tournamentSettings.groupSettings);
+      }
     } catch (error) {
       console.error('Error starting tournament:', error);
       alert(t('registration.failedToStartTournament'));
@@ -698,7 +707,7 @@ export function TournamentRegistration({ tournament, onBack }) {
                       <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
                       <div className="input-group">
-                        <label>{t('management.roundOf', { count: 32 })}:</label>
+                        <label>{t('management.top32')}:</label>
                         <select 
                           value={tournamentSettings.playoffSettings.legsToWinByRound?.[32] || 3}
                           onChange={(e) => setTournamentSettings({

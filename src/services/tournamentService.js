@@ -164,6 +164,7 @@ export const tournamentService = {
           },
           playoff_settings: tournamentData.playoffSettings || null,
           playoffs: tournamentData.playoffs || null,
+          tournament_type: tournamentData.tournamentType || 'groups_with_playoffs',
           user_id: user.id,
           status: tournamentData.status || 'open_for_registration'
         })
@@ -594,6 +595,7 @@ export const tournamentService = {
           playoffSettings: tournament.playoff_settings,
           playoffs: tournament.playoffs,
           playoffMatches: playoffMatches,
+          tournamentType: tournament.tournament_type || 'groups_with_playoffs',
           standingsCriteriaOrder: standingsCriteriaOrder,
           createdAt: tournament.created_at,
           updatedAt: tournament.updated_at,
@@ -760,6 +762,7 @@ export const tournamentService = {
           playoffSettings: tournament.playoff_settings,
           playoffs: tournament.playoffs,
           playoffMatches: playoffMatches,
+          tournamentType: tournament.tournament_type || 'groups_with_playoffs',
           standingsCriteriaOrder: groupSettings?.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
           createdAt: tournament.created_at,
           updatedAt: tournament.updated_at,
@@ -1398,6 +1401,11 @@ export const tournamentService = {
         group_settings: groupSettingsWithCriteria,
         updated_at: new Date().toISOString()
       };
+      
+      // Optionally update tournament status if provided in settings (e.g., for playoff-only start)
+      if (settings.status) {
+        updateData.status = settings.status;
+      }
       
       const { data, error } = await supabase
         .from('tournaments')

@@ -19,14 +19,18 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   
-  // Valid tabs
+  // Valid tabs (will be filtered for playoff-only tournaments)
   const validTabs = ['groups', 'matches', 'standings', 'playoffs', 'statistics', 'liveMatches'];
   
-  // Initialize activeTab from URL or default to 'groups'
+  // Initialize activeTab from URL or default
   const getInitialTab = () => {
     const tabFromUrl = searchParams.get('tab');
     if (tabFromUrl && validTabs.includes(tabFromUrl)) {
       return tabFromUrl;
+    }
+    // For playoff-only tournaments, default to playoffs tab
+    if (tournament?.tournamentType === 'playoff_only') {
+      return 'playoffs';
     }
     return 'groups';
   };
@@ -356,15 +360,17 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
     // Generate rounds from first round to final
     while (currentRoundSize > 1) {
+      const numMatches = Math.ceil(currentRoundSize / 2);
+      
       const round = {
         id: generateId(),
-        name: getRoundName(currentRoundSize),
+        name: getRoundNameByMatches(numMatches, rounds.length),
         matches: [],
         isComplete: false
       };
 
       // Create matches for this round
-      for (let i = 0; i < currentRoundSize / 2; i++) {
+      for (let i = 0; i < numMatches; i++) {
         round.matches.push({
           id: generateId(),
           player1: null,
@@ -386,7 +392,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
         // We'll add it after the final round is created
       }
       
-      currentRoundSize = currentRoundSize / 2;
+      currentRoundSize = numMatches;
       roundNumber++;
     }
 
@@ -590,7 +596,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
   // Check if group stage is complete
   const isGroupStageComplete = () => {
-    if (!tournament || !tournament.groups) return false;
+    if (!tournament) return false;
+    // For playoff-only tournaments, there is no group stage to complete
+    if (tournament.tournamentType === 'playoff_only') {
+      return true;
+    }
+    if (!tournament.groups) return false;
     return tournament.groups.every(group => 
       group.matches.every(match => match.status === 'completed')
     );
@@ -598,7 +609,16 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
   // Get qualifying players based on group standings, sorted by performance for seeding
   const getQualifyingPlayers = () => {
-    if (!tournament || !tournament.groups) return [];
+    if (!tournament) return [];
+    
+    // For playoff-only tournaments, all registered players qualify,
+    // sorted by name (or keep current order if you prefer)
+    if (tournament.tournamentType === 'playoff_only') {
+      const players = tournament.players || [];
+      return [...players].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    
+    if (!tournament.groups) return [];
     
     const qualificationMode = tournament.playoffSettings?.qualificationMode || 'perGroup';
     const allQualifyingPlayers = [];
@@ -727,9 +747,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   const startPlayoffs = async () => {
     if (!tournament) return;
     
-    if (!isGroupStageComplete()) {
-      alert(t('management.groupStageMustBeCompleted'));
-      return;
+    // For group-based tournaments, ensure group stage is complete first
+    if (tournament.tournamentType !== 'playoff_only') {
+      if (!isGroupStageComplete()) {
+        alert(t('management.groupStageMustBeCompleted'));
+        return;
+      }
     }
 
     const qualifyingPlayers = getQualifyingPlayers();
@@ -753,16 +776,40 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     alert(t('management.playoffsStartedSuccess', { count: qualifyingPlayers.length }));
   };
 
-  const getRoundName = (roundSize) => {
-    switch (roundSize) {
-      case 2: return t('management.final');
-      case 4: return t('management.semiFinals');
-      case 8: return t('management.quarterFinals');
-      case 16: return t('management.top16');
-      case 32: return t('management.roundOf', { count: 32 });
-      case 64: return t('management.roundOf', { count: 64 });
-      default: return t('management.roundOf', { count: roundSize });
+  // Get round name based on number of matches, not players
+  // This ensures standard names even with odd numbers of qualifiers
+  const getRoundNameByMatches = (numMatches, roundIndex) => {
+    // Determine round name based on number of matches
+    // Standard tournament naming: 1 match = Final, 2 matches = Semifinals, 4 matches = Quarterfinals, etc.
+    switch (numMatches) {
+      case 1: return t('management.final');
+      case 2: return t('management.semiFinals');
+      case 4: return t('management.quarterFinals');
+      case 8: return t('management.top16');
+      case 16: return t('management.roundOf', { count: 32 });
+      case 32: return t('management.roundOf', { count: 64 });
+      default:
+        // For other numbers, determine based on closest standard round
+        if (numMatches === 3) {
+          // 3 matches - closest to Quarterfinals (4 matches)
+          return t('management.quarterFinals');
+        } else if (numMatches <= 2) {
+          return numMatches === 1 ? t('management.final') : t('management.semiFinals');
+        } else if (numMatches <= 4) {
+          return t('management.quarterFinals');
+        } else if (numMatches <= 8) {
+          return t('management.top16');
+        } else {
+          // For larger numbers, calculate Round of X
+          const totalPlayers = numMatches * 2;
+          return t('management.roundOf', { count: totalPlayers });
+        }
     }
+  };
+  
+  // Keep old function for backwards compatibility (not used anymore)
+  const getRoundName = (roundSize) => {
+    return getRoundNameByMatches(Math.ceil(roundSize / 2), 0);
   };
 
   const handleDeleteTournament = async () => {
@@ -2264,24 +2311,28 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       </div>
 
       <div className="management-tabs">
-        <button 
-          className={activeTab === 'groups' ? 'active' : ''}
-          onClick={() => handleTabChange('groups')}
-        >
-          {t('management.groups')}
-        </button>
-        <button 
-          className={activeTab === 'matches' ? 'active' : ''}
-          onClick={() => handleTabChange('matches')}
-        >
-          {t('management.matches')}
-        </button>
-        <button 
-          className={activeTab === 'standings' ? 'active' : ''}
-          onClick={() => handleTabChange('standings')}
-        >
-          {t('management.standings')}
-        </button>
+        {tournament.tournamentType !== 'playoff_only' && (
+          <>
+            <button 
+              className={activeTab === 'groups' ? 'active' : ''}
+              onClick={() => handleTabChange('groups')}
+            >
+              {t('management.groups')}
+            </button>
+            <button 
+              className={activeTab === 'matches' ? 'active' : ''}
+              onClick={() => handleTabChange('matches')}
+            >
+              {t('management.matches')}
+            </button>
+            <button 
+              className={activeTab === 'standings' ? 'active' : ''}
+              onClick={() => handleTabChange('standings')}
+            >
+              {t('management.standings')}
+            </button>
+          </>
+        )}
         {tournament.playoffSettings?.enabled && (
           <button 
             className={activeTab === 'playoffs' ? 'active' : ''}
@@ -2306,9 +2357,9 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       </div>
 
       <div className="management-content">
-        {activeTab === 'groups' && renderGroups()}
-        {activeTab === 'matches' && renderMatches()}
-        {activeTab === 'standings' && renderStandings()}
+        {tournament.tournamentType !== 'playoff_only' && activeTab === 'groups' && renderGroups()}
+        {tournament.tournamentType !== 'playoff_only' && activeTab === 'matches' && renderMatches()}
+        {tournament.tournamentType !== 'playoff_only' && activeTab === 'standings' && renderStandings()}
         {activeTab === 'playoffs' && renderPlayoffs()}
         {activeTab === 'statistics' && renderStatistics()}
         {activeTab === 'liveMatches' && renderLiveMatches()}
@@ -2832,7 +2883,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
                     <div className="playoff-legs-settings">
                       <h5>{t('registration.playoffLegsToWin')}:</h5>
                       <div className="input-group">
-                        <label>{t('management.roundOf', { count: 32 })}:</label>
+                        <label>{t('management.top32')}:</label>
                         <select 
                           value={tournamentSettings.playoffSettings.legsToWinByRound?.[32] || 3}
                           onChange={(e) => setTournamentSettings({

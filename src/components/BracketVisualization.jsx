@@ -253,8 +253,8 @@ export function BracketVisualization({ rounds, playoffMatches = [] }) {
           className="bracket-connections-svg"
           style={{
             position: 'absolute',
-            top: '2rem',
-            left: '1rem',
+            top: '0',
+            left: '0',
             width: `${totalWidth}px`,
             height: `${totalHeight}px`,
             pointerEvents: 'none',
