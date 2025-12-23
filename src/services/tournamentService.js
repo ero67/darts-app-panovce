@@ -165,6 +165,7 @@ export const tournamentService = {
           playoff_settings: tournamentData.playoffSettings || null,
           playoffs: tournamentData.playoffs || null,
           tournament_type: tournamentData.tournamentType || 'groups_with_playoffs',
+          league_id: tournamentData.leagueId || null,
           user_id: user.id,
           status: tournamentData.status || 'open_for_registration'
         })
@@ -326,6 +327,7 @@ export const tournamentService = {
         playoffSettings: tournament.playoff_settings,
         playoffs: tournament.playoffs,
         standingsCriteriaOrder: groupSettings?.standingsCriteriaOrder || tournamentData.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+        leagueId: tournament.league_id || tournamentData.leagueId || null,
         createdAt: tournament.created_at,
         updatedAt: tournament.updated_at,
         players: tournamentData.players.map(player => ({
@@ -597,6 +599,7 @@ export const tournamentService = {
           playoffMatches: playoffMatches,
           tournamentType: tournament.tournament_type || 'groups_with_playoffs',
           standingsCriteriaOrder: standingsCriteriaOrder,
+          leagueId: tournament.league_id || null,
           createdAt: tournament.created_at,
           updatedAt: tournament.updated_at,
           userId: tournament.user_id,
@@ -764,6 +767,7 @@ export const tournamentService = {
           playoffMatches: playoffMatches,
           tournamentType: tournament.tournament_type || 'groups_with_playoffs',
           standingsCriteriaOrder: groupSettings?.standingsCriteriaOrder || ['matchesWon', 'legDifference', 'average', 'headToHead'],
+          leagueId: tournament.league_id || null,
           createdAt: tournament.created_at,
           updatedAt: tournament.updated_at,
           userId: tournament.user_id,

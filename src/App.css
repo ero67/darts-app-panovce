@@ -2636,6 +2636,7 @@ body {
   padding: 0.75rem;
   border-radius: 15px;
   border: 1px solid var(--border-color);
+  align-items: start; /* prevent non-active player cards from stretching to the tallest column */
   transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
@@ -2654,6 +2655,13 @@ body {
   border-radius: 12px;
   transition: all 0.3s ease;
   background: transparent;
+}
+
+/* The app also uses .player-score in other contexts (match cards, lists).
+   Lock the MatchInterface scoreboard layout so it doesn't inherit later .player-score flex rules. */
+.match-scoreboard .player-score {
+  align-self: start;
+  display: block;
 }
 
 /* Non-active player text - black in light mode, white in dark mode */
@@ -3061,6 +3069,125 @@ body {
   border-radius: 15px;
   padding: 0.75rem;
   transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* 3-dart total scoring mode */
+.turn-total-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.turn-total-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--card-bg);
+}
+
+.turn-total-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.turn-total-value {
+  color: var(--text-primary);
+  font-weight: 800;
+  font-size: 1.65rem;
+  line-height: 1.1;
+}
+
+.turn-total-value.invalid {
+  color: var(--accent-danger);
+}
+
+.turn-total-hint {
+  color: var(--text-tertiary);
+  font-size: 0.8rem;
+}
+
+.turn-total-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+
+.turn-total-keypad .dart-btn {
+  padding: 0.75rem 0.5rem;
+  font-size: 1rem;
+  min-height: 44px;
+}
+
+.turn-total-action {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.turn-total-ok {
+  grid-column: span 3;
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+  font-weight: 800;
+}
+
+.turn-total-footer {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .turn-total-container {
+    gap: 0.45rem;
+  }
+
+  .turn-total-display {
+    padding: 0.5rem 0.6rem;
+    border-radius: 10px;
+  }
+
+  .turn-total-value {
+    font-size: 1.5rem;
+  }
+
+  .turn-total-keypad {
+    gap: 0.3rem;
+  }
+
+  .turn-total-keypad .dart-btn {
+    padding: 0.65rem 0.45rem;
+    font-size: 0.95rem;
+    min-height: 40px;
+    border-radius: 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .turn-total-display {
+    padding: 0.45rem 0.55rem;
+  }
+
+  .turn-total-label {
+    font-size: 0.8rem;
+  }
+
+  .turn-total-hint {
+    font-size: 0.75rem;
+  }
+
+  .turn-total-value {
+    font-size: 1.35rem;
+  }
+
+  .turn-total-keypad .dart-btn {
+    padding: 0.55rem 0.4rem;
+    font-size: 0.9rem;
+    min-height: 36px;
+  }
 }
 
 @media (max-width: 768px) {

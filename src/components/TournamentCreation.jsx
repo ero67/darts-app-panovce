@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Trophy, ArrowLeft, ChevronUp, ChevronDown } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useLeague } from '../contexts/LeagueContext';
+import { useLocation } from 'react-router-dom';
 
 // Generate unique ID for tournaments
 const generateId = () => {
@@ -9,38 +11,64 @@ const generateId = () => {
 
 export function TournamentCreation({ onTournamentCreated, onBack }) {
   const { t } = useLanguage();
+  const { currentLeague, selectLeague } = useLeague();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const leagueId = searchParams.get('leagueId');
+  
+  // Initialize with league defaults if available
+  const leagueDefaults = currentLeague?.defaultTournamentSettings || {};
+  
   const [tournamentName, setTournamentName] = useState('');
-  const [legsToWin, setLegsToWin] = useState(3);
-  const [startingScore, setStartingScore] = useState(501);
-  const [tournamentType, setTournamentType] = useState('groups_with_playoffs'); // 'groups_with_playoffs' | 'playoff_only'
-  const [groupSettings, setGroupSettings] = useState({
-    type: 'groups', // 'groups' or 'playersPerGroup'
+  const [legsToWin, setLegsToWin] = useState(leagueDefaults.legsToWin || 3);
+  const [startingScore, setStartingScore] = useState(leagueDefaults.startingScore || 501);
+  const [tournamentType, setTournamentType] = useState(leagueDefaults.tournamentType || 'groups_with_playoffs');
+  const [groupSettings, setGroupSettings] = useState(leagueDefaults.groupSettings || {
+    type: 'groups',
     value: 2
   });
-  const [standingsCriteriaOrder, setStandingsCriteriaOrder] = useState([
-    'matchesWon',
-    'legDifference',
-    'average',
-    'headToHead'
-  ]);
-  const [playoffSettings, setPlayoffSettings] = useState({
+  const [standingsCriteriaOrder, setStandingsCriteriaOrder] = useState(
+    leagueDefaults.standingsCriteriaOrder || [
+      'matchesWon',
+      'legDifference',
+      'average',
+      'headToHead'
+    ]
+  );
+  const [playoffSettings, setPlayoffSettings] = useState(leagueDefaults.playoffSettings || {
     enabled: true,
-    qualificationMode: 'perGroup', // 'perGroup' or 'totalPlayers'
+    qualificationMode: 'perGroup',
     playersPerGroup: 1,
     totalPlayersToAdvance: 8,
-    // For playoff_only tournaments: which stage the playoff starts at
-    // (number represents players in first round: 2=Final,4=Semi,8=Quarters,16=Round of 16,32=Round of 32)
     startingRoundPlayers: 8,
-    seedingMethod: 'standard', // 'standard' or 'groupBased'
-    groupMatchups: [], // Array of {group1: 'A', group2: 'D'} for group-based seeding
+    seedingMethod: 'standard',
+    groupMatchups: [],
     legsToWinByRound: {
-      32: 3,  // Round of 32
-      16: 3,  // Round of 16
-      8: 3,   // Quarter-finals
-      4: 3,   // Semi-finals
-      2: 3    // Final
+      32: 3,
+      16: 3,
+      8: 3,
+      4: 3,
+      2: 3
     }
   });
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+
+  // Load league if leagueId is provided
+  useEffect(() => {
+    if (leagueId && (!currentLeague || currentLeague.id !== leagueId)) {
+      selectLeague(leagueId);
+    }
+  }, [leagueId, currentLeague, selectLeague]);
+
+  // Auto-select active league members when league is loaded
+  useEffect(() => {
+    if (currentLeague && currentLeague.members && leagueId) {
+      const activeMembers = currentLeague.members
+        .filter(m => m.isActive)
+        .map(m => m.player);
+      setSelectedPlayers(activeMembers);
+    }
+  }, [currentLeague, leagueId]);
 
   const createTournament = () => {
     if (!tournamentName.trim()) {
@@ -51,7 +79,7 @@ export function TournamentCreation({ onTournamentCreated, onBack }) {
     const tournament = {
       id: generateId(),
       name: tournamentName.trim(),
-      players: [], // Players will be added after creation
+      players: selectedPlayers.length > 0 ? selectedPlayers : [], // Pre-populate with league members if available
       groups: [], // Groups will be generated when tournament starts
       legsToWin: legsToWin,
       startingScore: startingScore,
@@ -60,6 +88,7 @@ export function TournamentCreation({ onTournamentCreated, onBack }) {
       tournamentType,
       standingsCriteriaOrder: standingsCriteriaOrder,
       playoffs: null, // Playoffs will be created only when user clicks "Start Playoffs"
+      leagueId: leagueId || null, // Link to league if created from league
       createdAt: new Date().toISOString(),
       status: 'open_for_registration' // Tournament is open for player registration
     };

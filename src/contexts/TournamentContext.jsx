@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { tournamentService, matchService } from '../services/tournamentService.js';
+import { leagueService } from '../services/leagueService.js';
 
 
 const TournamentContext = createContext();
@@ -527,6 +528,20 @@ export function TournamentProvider({ children }) {
               currentState.currentTournament.id,
               'completed'
             );
+            
+            // If tournament is linked to a league, calculate points
+            if (currentState.currentTournament.leagueId) {
+              try {
+                await leagueService.calculateTournamentPlacements(
+                  currentState.currentTournament.leagueId,
+                  currentState.currentTournament.id,
+                  currentState.currentTournament
+                );
+              } catch (error) {
+                console.error('Error calculating league points:', error);
+                // Don't block tournament completion if points calculation fails
+              }
+            }
           }
           
           // Refresh tournament from database to get latest match results with full statistics

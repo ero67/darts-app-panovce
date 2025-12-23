@@ -67,6 +67,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       turnHistory: [],
       matchComplete: false,
       inputMode: 'single',
+      scoringMode: 'dart', // 'dart' (dart-by-dart) | 'turnTotal' (enter 3-dart total)
       showMatchStarter: false // Don't show match starter dialog by default
     };
   };
@@ -89,9 +90,12 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   const [turnHistory, setTurnHistory] = useState(initialState?.turnHistory || []);
   const [matchComplete, setMatchComplete] = useState(initialState?.matchComplete || false);
   const [inputMode, setInputMode] = useState(initialState?.inputMode || 'single');
+  const [scoringMode, setScoringMode] = useState(initialState?.scoringMode || 'dart');
   const [showMatchStarter, setShowMatchStarter] = useState(initialState?.showMatchStarter || false);
   const [isRemovingDart, setIsRemovingDart] = useState(false); // Prevent rapid clicks
   const [bustingPlayer, setBustingPlayer] = useState(null); // Track which player is busting (0 or 1)
+  const [turnTotalInput, setTurnTotalInput] = useState('');
+  const [pendingCheckout, setPendingCheckout] = useState(null); // { total: number, dartsUsed: 1|2|3, finishedOnDouble: boolean } | null
 
   // Only show match starter dialog if it's a new match and no match starter has been chosen
   // This effect is now mainly for cases where the state changes after initial load
@@ -277,6 +281,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
               turnHistory: [],
               matchComplete: false,
               inputMode: 'single',
+              scoringMode: 'dart',
               showMatchStarter: false
             };
             localStorage.setItem(`match-state-${match.id}`, JSON.stringify(matchState));
@@ -345,11 +350,12 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
         turnHistory,
         matchComplete,
         inputMode,
+        scoringMode,
         showMatchStarter
       };
       localStorage.setItem(`match-state-${match.id}`, JSON.stringify(matchState));
     }
-  }, [match?.id, currentLeg, currentPlayer, matchStarter, legScores, currentTurn, turnHistory, matchComplete, inputMode, showMatchStarter]);
+  }, [match?.id, currentLeg, currentPlayer, matchStarter, legScores, currentTurn, turnHistory, matchComplete, inputMode, scoringMode, showMatchStarter]);
 
   const players = [
     match.player1 || { id: 'player1', name: 'Player 1' },
@@ -360,6 +366,138 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
     : null;
 
   const dartNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 0]; // Ascending order: 1-20, 25 (bull), 0 (miss)
+
+  const appendTurnTotalDigit = (digit) => {
+    setTurnTotalInput(prev => {
+      const next = `${prev}${digit}`;
+      // keep it to max 3 digits (max is 180 anyway)
+      if (next.length > 3) return prev;
+      return next.replace(/^0+(?=\d)/, ''); // normalize leading zeros
+    });
+  };
+
+  const backspaceTurnTotal = () => setTurnTotalInput(prev => prev.slice(0, -1));
+  const clearTurnTotal = () => setTurnTotalInput('');
+
+  const getTurnTotalValue = () => {
+    if (!turnTotalInput) return null;
+    const n = Number(turnTotalInput);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  };
+
+  const undoLastVisit = () => {
+    if (isViewOnly) return;
+    if (turnHistory.length === 0) return;
+
+    const last = turnHistory[turnHistory.length - 1];
+    // Only undo normal turns (not checkouts / busts) – those aren't added to history by finishTurn
+    const playerIndex = last.player;
+    const turnScore = last.turn?.score || 0;
+    const turnDarts = last.turn?.darts || 0;
+    const playerKey = `player${playerIndex + 1}`;
+    const restoredScoreRaw =
+      last.turn?.turnStartScore !== null && last.turn?.turnStartScore !== undefined
+        ? last.turn.turnStartScore
+        : null;
+
+    setCurrentPlayer(playerIndex);
+    setCurrentLeg(last.leg);
+    setPendingCheckout(null);
+    clearTurnTotal();
+    setCurrentTurn(prev => ({
+      score: 0,
+      darts: 0,
+      scores: [],
+      dartCount: Math.max(
+        0,
+        (last.turn?.dartCount !== null && last.turn?.dartCount !== undefined
+          ? last.turn.dartCount
+          : (prev.dartCount || 0)) - turnDarts
+      ),
+      turnStartScore: null
+    }));
+
+    setLegScores(prev => ({
+      ...prev,
+      [playerKey]: {
+        ...prev[playerKey],
+        // Restore remaining score to what it was at the start of that visit (more reliable than adding turnScore back)
+        currentScore: Math.min(
+          matchSettings.startingScore,
+          Math.max(
+            0,
+            restoredScoreRaw !== null ? restoredScoreRaw : (prev[playerKey].currentScore + turnScore)
+          )
+        ),
+        totalScore: Math.max(0, prev[playerKey].totalScore - turnScore),
+        totalDarts: Math.max(0, prev[playerKey].totalDarts - turnDarts),
+        legDarts: Math.max(0, prev[playerKey].legDarts - turnDarts)
+      }
+    }));
+
+    setTurnHistory(prev => prev.slice(0, -1));
+  };
+
+  const applyTurnTotal = (total, { finishedOnDouble = false, dartsUsed = 3 } = {}) => {
+    if (isViewOnly) return;
+    if (currentPlayer === null || currentPlayer === undefined || !currentPlayerData) return;
+    if (!Number.isInteger(total) || total < 0 || total > 180) return;
+    if (![1, 2, 3].includes(dartsUsed)) return;
+
+    const turnStartScore = currentPlayerData.currentScore;
+    const newCurrentScore = turnStartScore - total;
+    const isBust = newCurrentScore < 0 || newCurrentScore === 1 || (newCurrentScore === 0 && !finishedOnDouble);
+
+    // Update the displayed score immediately for non-bust cases (finishTurn expects currentScore to already be updated)
+    if (!isBust) {
+      setLegScores(prev => ({
+        ...prev,
+        [`player${currentPlayer + 1}`]: {
+          ...prev[`player${currentPlayer + 1}`],
+          currentScore: newCurrentScore
+        }
+      }));
+    }
+
+    if (isBust) {
+      setBustingPlayer(currentPlayer);
+      setTimeout(() => setBustingPlayer(null), 900);
+    }
+
+    const turnData = {
+      score: total,
+      darts: dartsUsed,
+      scores: [{
+        value: total,
+        label: String(total),
+        number: null,
+        multiplier: finishedOnDouble ? 2 : 1,
+        isTurnTotal: true
+      }],
+      dartCount: (currentTurn.dartCount || 0) + dartsUsed,
+      currentScore: newCurrentScore,
+      turnStartScore
+    };
+
+    finishTurn(turnData);
+    clearTurnTotal();
+  };
+
+  const submitTurnTotal = () => {
+    const total = getTurnTotalValue();
+    if (total === null) return;
+    if (!currentPlayerData) return;
+    const remainingAfter = currentPlayerData.currentScore - total;
+
+    // If it hits exactly 0, we need a quick confirmation for double-out
+    if (remainingAfter === 0) {
+      setPendingCheckout({ total, dartsUsed: 3, finishedOnDouble: true });
+      return;
+    }
+
+    applyTurnTotal(total, { finishedOnDouble: false });
+  };
 
   // Start live match when component mounts (only if match is not completed and user is logged in)
   useEffect(() => {
@@ -1080,6 +1218,7 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       currentState.currentPlayer = playerIndex;
       currentState.currentLeg = 1;
       currentState.matchComplete = false;
+      currentState.scoringMode = scoringMode;
       
       // Save to localStorage
       localStorage.setItem(`match-state-${match.id}`, JSON.stringify(currentState));
@@ -1107,13 +1246,13 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
   const getLastTurnThrows = (playerIndex) => {
     // First check if it's the current player's turn - show current turn throws
     if (currentPlayer === playerIndex && currentTurn.scores.length > 0) {
-      return currentTurn.scores.map(s => s.label);
+      return currentTurn.scores.map(s => s.label).filter(Boolean);
     }
     
     // Otherwise, find the last completed turn for this player from history
     for (let i = turnHistory.length - 1; i >= 0; i--) {
       if (turnHistory[i].player === playerIndex && turnHistory[i].turn.scores.length > 0) {
-        return turnHistory[i].turn.scores.map(s => s.label);
+        return turnHistory[i].turn.scores.map(s => s.label).filter(Boolean);
       }
     }
     
@@ -1163,6 +1302,22 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
       <div className="leg-starter-dialog">
         <div className="dialog-content">
           <h2>Who starts this match?</h2>
+          <div className="input-mode-selector" style={{ marginTop: '0.75rem' }}>
+            <button
+              className={`mode-btn ${scoringMode === 'dart' ? 'active' : ''}`}
+              onClick={() => setScoringMode('dart')}
+              type="button"
+            >
+              Dart-by-dart
+            </button>
+            <button
+              className={`mode-btn ${scoringMode === 'turnTotal' ? 'active' : ''}`}
+              onClick={() => setScoringMode('turnTotal')}
+              type="button"
+            >
+              3-dart total
+            </button>
+          </div>
           <div className="player-options">
             <button 
               className="player-option"
@@ -1189,6 +1344,69 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
 
   return (
     <div className="match-interface mobile-optimized">
+      {pendingCheckout !== null && (
+        <div className="leg-starter-dialog">
+          <div className="dialog-content">
+            <h2>Checkout</h2>
+            <p style={{ marginTop: '0.5rem' }}>
+              You entered <strong>{pendingCheckout.total}</strong>. How many darts did you use to finish?
+            </p>
+
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+              {[1, 2, 3].map(n => (
+                <button
+                  key={n}
+                  className={`mode-btn ${pendingCheckout.dartsUsed === n ? 'active' : ''}`}
+                  onClick={() => setPendingCheckout(prev => ({ ...prev, dartsUsed: n }))}
+                  type="button"
+                >
+                  {n} dart{n === 1 ? '' : 's'}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                className={`mode-btn ${pendingCheckout.finishedOnDouble ? 'active' : ''}`}
+                onClick={() => setPendingCheckout(prev => ({ ...prev, finishedOnDouble: true }))}
+                type="button"
+              >
+                Double-out
+              </button>
+              <button
+                className={`mode-btn ${!pendingCheckout.finishedOnDouble ? 'active' : ''}`}
+                onClick={() => setPendingCheckout(prev => ({ ...prev, finishedOnDouble: false }))}
+                type="button"
+              >
+                Bust
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1rem', flexWrap: 'wrap' }}>
+              <button
+                className="create-tournament-btn"
+                onClick={() => {
+                  applyTurnTotal(pendingCheckout.total, {
+                    finishedOnDouble: pendingCheckout.finishedOnDouble,
+                    dartsUsed: pendingCheckout.dartsUsed
+                  });
+                  setPendingCheckout(null);
+                }}
+                type="button"
+              >
+                Confirm
+              </button>
+              <button
+                className="mode-btn"
+                onClick={() => setPendingCheckout(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="match-scoreboard">
         <div className={`player-score player1 ${currentPlayer === 0 ? 'active-player' : ''} ${bustingPlayer === 0 ? 'bust' : ''}`}>
           <div className="player-header">
@@ -1248,40 +1466,84 @@ export function MatchInterface({ match, onMatchComplete, onBack }) {
           </div>
         ) : (
           <>
-            {/* Number Selection, Mode Selection, and Remove Last */}
-            <div className="dart-numbers">
-              {dartNumbers.map((number, index) => (
-                <button
-                  key={index}
-                  className={`dart-btn ${number === 25 ? 'bull' : inputMode === 'triple' ? 'triple' : inputMode === 'double' ? 'double' : 'single'}`}
-                  onClick={() => addScore(number)}
-                  disabled={currentTurn.darts >= 3 || (number === 25 && inputMode === 'triple')}
-                >
-                  {number === 0 ? '0' : number === 25 ? '25' : number}
-                </button>
-              ))}
-              {/* Mode buttons in same row */}
-              <button 
-                className={`mode-btn-inline ${inputMode === 'double' ? 'active' : ''}`}
-                onClick={() => setInputMode(inputMode === 'double' ? 'single' : 'double')}
-              >
-                Double
-              </button>
-              <button 
-                className={`mode-btn-inline ${inputMode === 'triple' ? 'active' : ''}`}
-                onClick={() => setInputMode(inputMode === 'triple' ? 'single' : 'triple')}
-              >
-                Triple
-              </button>
-              {/* Remove button */}
-              <button 
-                className="remove-last-btn dart-btn"
-                onClick={removeLastDart}
-                disabled={(currentTurn.scores.length === 0 && turnHistory.length === 0) || isRemovingDart}
-              >
-                <ArrowLeft size={20} />
-              </button>
-            </div>
+            {scoringMode === 'dart' ? (
+              <>
+                {/* Number Selection, Mode Selection, and Remove Last */}
+                <div className="dart-numbers">
+                  {dartNumbers.map((number, index) => (
+                    <button
+                      key={index}
+                      className={`dart-btn ${number === 25 ? 'bull' : inputMode === 'triple' ? 'triple' : inputMode === 'double' ? 'double' : 'single'}`}
+                      onClick={() => addScore(number)}
+                      disabled={currentTurn.darts >= 3 || (number === 25 && inputMode === 'triple')}
+                    >
+                      {number === 0 ? '0' : number === 25 ? '25' : number}
+                    </button>
+                  ))}
+                  {/* Mode buttons in same row */}
+                  <button 
+                    className={`mode-btn-inline ${inputMode === 'double' ? 'active' : ''}`}
+                    onClick={() => setInputMode(inputMode === 'double' ? 'single' : 'double')}
+                  >
+                    Double
+                  </button>
+                  <button 
+                    className={`mode-btn-inline ${inputMode === 'triple' ? 'active' : ''}`}
+                    onClick={() => setInputMode(inputMode === 'triple' ? 'single' : 'triple')}
+                  >
+                    Triple
+                  </button>
+                  {/* Remove button */}
+                  <button 
+                    className="remove-last-btn dart-btn"
+                    onClick={removeLastDart}
+                    disabled={(currentTurn.scores.length === 0 && turnHistory.length === 0) || isRemovingDart}
+                  >
+                    <ArrowLeft size={20} />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="turn-total-container">
+                <div className="turn-total-display">
+                  <div className="turn-total-label">3-dart total</div>
+                  <div className={`turn-total-value ${getTurnTotalValue() !== null && getTurnTotalValue() > 180 ? 'invalid' : ''}`}>
+                    {turnTotalInput || '—'}
+                  </div>
+                  <div className="turn-total-hint">Enter 0–180, then press OK</div>
+                </div>
+
+                <div className="turn-total-keypad">
+                  {[1,2,3,4,5,6,7,8,9].map(n => (
+                    <button key={n} className="dart-btn" onClick={() => appendTurnTotalDigit(n)} type="button">
+                      {n}
+                    </button>
+                  ))}
+                  <button className="dart-btn turn-total-action" onClick={clearTurnTotal} type="button">Clear</button>
+                  <button className="dart-btn" onClick={() => appendTurnTotalDigit(0)} type="button">0</button>
+                  <button className="dart-btn turn-total-action" onClick={backspaceTurnTotal} type="button">⌫</button>
+                  <button
+                    className="dart-btn turn-total-ok"
+                    onClick={submitTurnTotal}
+                    disabled={getTurnTotalValue() === null || getTurnTotalValue() > 180}
+                    type="button"
+                  >
+                    OK
+                  </button>
+                </div>
+
+                <div className="turn-total-footer">
+                  <button
+                    className="remove-last-btn"
+                    onClick={undoLastVisit}
+                    disabled={turnHistory.length === 0}
+                    type="button"
+                  >
+                    Undo last visit
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

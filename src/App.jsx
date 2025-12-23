@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { TournamentProvider, useTournament } from './contexts/TournamentContext';
+import { LeagueProvider, useLeague } from './contexts/LeagueContext';
 import { LiveMatchProvider } from './contexts/LiveMatchContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdminProvider, useAdmin } from './contexts/AdminContext';
@@ -14,6 +15,9 @@ import { TournamentCreation } from './components/TournamentCreation';
 import { TournamentManagement } from './components/TournamentManagement';
 import { TournamentRegistration } from './components/TournamentRegistration';
 import { MatchInterface } from './components/MatchInterface';
+import { LeaguesList } from './components/LeaguesList';
+import { LeagueDetail } from './components/LeagueDetail';
+import { LeagueCreation } from './components/LeagueCreation';
 import { Auth } from './components/Auth';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
 import { AdminPanel } from './components/AdminPanel';
@@ -34,6 +38,10 @@ function AppContent() {
     completeMatch,
     deleteTournament
   } = useTournament();
+  const {
+    createLeague,
+    selectLeague
+  } = useLeague();
   
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -123,6 +131,19 @@ function AppContent() {
         onMatchStart={handleMatchStart}
         onBack={() => navigate('/tournaments')}
         onDeleteTournament={handleDeleteTournament}
+      />
+    );
+  };
+
+  // Component to handle league detail loading
+  const LeagueDetailRoute = ({ onBack, onCreateTournament, onSelectTournament }) => {
+    const { id } = useParams();
+    return (
+      <LeagueDetail 
+        leagueId={id}
+        onBack={onBack}
+        onCreateTournament={onCreateTournament}
+        onSelectTournament={onSelectTournament}
       />
     );
   };
@@ -229,6 +250,30 @@ function AppContent() {
     }
   };
 
+  const handleCreateLeague = () => {
+    navigate('/create-league');
+  };
+
+  const handleLeagueCreated = async (leagueData) => {
+    try {
+      await createLeague(leagueData);
+      navigate(`/league/${leagueData.id}`);
+    } catch (error) {
+      console.error('Error creating league:', error);
+      alert('Failed to create league');
+    }
+  };
+
+  const handleSelectLeague = (league) => {
+    selectLeague(league.id);
+    navigate(`/league/${league.id}`);
+  };
+
+  const handleCreateTournamentFromLeague = (league) => {
+    // Navigate to tournament creation with league context
+    navigate(`/create-tournament?leagueId=${league.id}`);
+  };
+
 
   return (
     <div className="app">
@@ -310,6 +355,34 @@ function AppContent() {
           } />
           <Route path="/tournament/:id" element={<TournamentRoute />} />
           <Route path="/match/:id" element={<MatchRoute />} />
+          <Route path="/leagues" element={
+            <LeaguesList 
+              onCreateLeague={handleCreateLeague}
+              onSelectLeague={handleSelectLeague}
+            />
+          } />
+          <Route path="/create-league" element={
+            user && canCreateTournaments ? (
+              <LeagueCreation 
+                onLeagueCreated={handleLeagueCreated}
+                onBack={() => navigate('/leagues')}
+              />
+            ) : user ? (
+              <div className="unauthorized-container">
+                <h2>Access Restricted</h2>
+                <p>Only managers and administrators can create leagues.</p>
+              </div>
+            ) : (
+              <Auth />
+            )
+          } />
+          <Route path="/league/:id" element={
+            <LeagueDetailRoute 
+              onBack={() => navigate('/leagues')}
+              onCreateTournament={handleCreateTournamentFromLeague}
+              onSelectTournament={handleSelectTournament}
+            />
+          } />
         </Routes>
       </main>
     </div>
@@ -323,11 +396,13 @@ function App() {
         <LanguageProvider>
           <AuthProvider>
             <AdminProvider>
-              <TournamentProvider>
-                <LiveMatchProvider>
-                  <AppContent />
-                </LiveMatchProvider>
-              </TournamentProvider>
+              <LeagueProvider>
+                <TournamentProvider>
+                  <LiveMatchProvider>
+                    <AppContent />
+                  </LiveMatchProvider>
+                </TournamentProvider>
+              </LeagueProvider>
             </AdminProvider>
           </AuthProvider>
         </LanguageProvider>

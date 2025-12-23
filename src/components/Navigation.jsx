@@ -30,6 +30,7 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
     { id: '/', label: t('navigation.home'), icon: Home },
     { id: '/dashboard', label: t('navigation.dashboard'), icon: Trophy },
     { id: '/tournaments', label: t('navigation.tournaments'), icon: Users },
+    // { id: '/leagues', label: t('navigation.leagues'), icon: Crown }, // temporarily hidden
     // { id: '/privacy', label: 'Privacy', icon: Shield },
     // { id: '/players', label: t('navigation.players'), icon: Users },
     // { id: '/settings', label: t('navigation.settings'), icon: Settings }
@@ -79,7 +80,7 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
           <button 
             className="collapse-btn"
             onClick={() => setIsCollapsed(!isCollapsed)}
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isCollapsed ? t('navigation.expandSidebar') : t('navigation.collapseSidebar')}
           >
             {isCollapsed ? <Menu size={16} /> : <X size={16} />}
           </button>
@@ -112,10 +113,10 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
           <button
             className={`nav-item ${currentView === '/admin' ? 'active' : ''}`}
             onClick={() => handleNavItemClick('/admin')}
-            title={isCollapsed ? 'Admin Panel' : ''}
+            title={isCollapsed ? t('navigation.adminPanel') : ''}
           >
             <Crown size={18} />
-            {(!isCollapsed || isMobile) && <span>Admin Panel</span>}
+            {(!isCollapsed || isMobile) && <span>{t('navigation.adminPanel')}</span>}
           </button>
         )}
       </div>
@@ -124,10 +125,10 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
         <button
           className="nav-item"
           onClick={() => handleNavItemClick('/privacy')}
-          title={isCollapsed ? 'Privacy' : ''}
+          title={isCollapsed ? t('navigation.privacy') : ''}
         >
           <Shield size={16} />
-          {(!isCollapsed || isMobile) && <span>Privacy</span>}
+          {(!isCollapsed || isMobile) && <span>{t('navigation.privacy')}</span>}
         </button>
         {user ? (
           <>
