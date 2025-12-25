@@ -178,6 +178,47 @@ GROUP BY m.group_id, g.tournament_id, t.name
 HAVING COUNT(*) > 1
 ORDER BY match_count DESC;
 
+-- 10b. Check playoff matches are correctly linked to a tournament
+-- Playoff matches typically have group_id = NULL, so tournament_id is the only reliable scope key.
+-- If tournament_id is NULL here, UI queries can accidentally mix playoff matches across tournaments.
+SELECT
+    m.id as match_id,
+    m.tournament_id,
+    t.name as tournament_name,
+    m.group_id,
+    m.is_playoff,
+    m.status,
+    p1.name as player1_name,
+    p2.name as player2_name,
+    m.created_at
+FROM matches m
+LEFT JOIN tournaments t ON m.tournament_id = t.id
+LEFT JOIN players p1 ON m.player1_id = p1.id
+LEFT JOIN players p2 ON m.player2_id = p2.id
+WHERE m.is_playoff = true
+  AND (m.tournament_id IS NULL OR t.id IS NULL)
+ORDER BY m.created_at DESC;
+
+-- 10c. Check for group matches with mismatched tournament_id vs their group's tournament_id
+-- This should return 0 rows.
+SELECT
+    m.id as match_id,
+    m.group_id,
+    m.tournament_id as match_tournament_id,
+    g.tournament_id as group_tournament_id,
+    t1.name as match_tournament_name,
+    t2.name as group_tournament_name,
+    m.status,
+    m.created_at
+FROM matches m
+JOIN groups g ON g.id = m.group_id
+LEFT JOIN tournaments t1 ON t1.id = m.tournament_id
+LEFT JOIN tournaments t2 ON t2.id = g.tournament_id
+WHERE m.group_id IS NOT NULL
+  AND m.tournament_id IS NOT NULL
+  AND m.tournament_id <> g.tournament_id
+ORDER BY m.created_at DESC;
+
 -- 11. CLEANUP: Delete orphaned matches (matches with NULL group_id or invalid group_id)
 -- UNCOMMENT AND RUN CAREFULLY - This will delete matches!
 -- DELETE FROM matches

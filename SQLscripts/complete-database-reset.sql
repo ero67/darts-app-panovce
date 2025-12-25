@@ -52,6 +52,7 @@ CREATE TABLE groups (
 -- Create matches table
 CREATE TABLE matches (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE, -- Direct tournament link (required for playoff-only tournaments)
     group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
     player1_id UUID REFERENCES players(id),
     player2_id UUID REFERENCES players(id),
@@ -66,7 +67,8 @@ CREATE TABLE matches (
     playoff_round INTEGER,
     playoff_match_number INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT chk_playoff_tournament_id CHECK (is_playoff = false OR tournament_id IS NOT NULL)
 );
 
 -- Create legs table for detailed match tracking
@@ -170,6 +172,7 @@ CREATE TABLE tournament_stats (
 CREATE INDEX idx_tournaments_user_id ON tournaments(user_id);
 CREATE INDEX idx_tournaments_status ON tournaments(status);
 CREATE INDEX idx_groups_tournament_id ON groups(tournament_id);
+CREATE INDEX idx_matches_tournament_id ON matches(tournament_id);
 CREATE INDEX idx_matches_group_id ON matches(group_id);
 CREATE INDEX idx_matches_status ON matches(status);
 CREATE INDEX idx_matches_is_playoff ON matches(is_playoff);

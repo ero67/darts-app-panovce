@@ -547,8 +547,10 @@ export const tournamentService = {
           })
 
         // Get playoff matches for this tournament
+        // IMPORTANT: playoff matches have group_id = NULL, so we must scope by matches.tournament_id
+        // Otherwise every tournament would "see" every playoff match in the DB, leaking statistics across tournaments.
         const playoffMatches = allMatches
-          .filter(match => match.is_playoff === true)
+          .filter(match => match.is_playoff === true && match.tournament_id === tournament.id)
           .map(match => {
             return {
               id: match.id,
