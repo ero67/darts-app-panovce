@@ -85,7 +85,7 @@ CREATE TRIGGER update_leagues_updated_at BEFORE UPDATE ON leagues
 
 -- Create updated_at trigger for league_tournament_results
 CREATE TRIGGER update_league_tournament_results_updated_at BEFORE UPDATE ON league_tournament_results
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    FOjknR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Create updated_at trigger for league_leaderboard
 CREATE TRIGGER update_league_leaderboard_updated_at BEFORE UPDATE ON league_leaderboard

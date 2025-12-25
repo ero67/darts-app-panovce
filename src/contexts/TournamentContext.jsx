@@ -582,9 +582,13 @@ export function TournamentProvider({ children }) {
     dispatch({ type: ACTIONS.START_PLAYOFFS, payload: { playoffs: playoffsData } });
   };
 
-  const startTournament = async (groupSettings) => {
+  const startTournament = async (groupSettings, customGroups = null) => {
     try {
-      const updatedTournament = await tournamentService.startTournament(state.currentTournament.id, groupSettings);
+      const updatedTournament = await tournamentService.startTournament(
+        state.currentTournament.id,
+        groupSettings,
+        customGroups
+      );
       dispatch({ type: ACTIONS.SELECT_TOURNAMENT, payload: updatedTournament });
       return updatedTournament;
     } catch (error) {

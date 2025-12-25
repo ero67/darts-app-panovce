@@ -196,7 +196,11 @@
     "tournamentTypeGroupsWithPlayoffs": "Skupinová fáza s voliteľným play-off",
     "tournamentTypePlayoffOnly": "Len play-off (bez skupinovej fázy)",
     "playoffStartStage": "Play-off začína od",
-    "playoffStartStageDescription": "Určuje, od ktorého kola začne vyraďovacia fáza."
+    "playoffStartStageDescription": "Určuje, od ktorého kola začne vyraďovacia fáza.",
+    "groupPreviewTitle": "Náhľad skupín (úprava pred štartom)",
+    "groupPreviewHint": "Hráčov môžeš presúvať medzi skupinami. Skupiny a zápasy sa vytvoria až po potvrdení štartu.",
+    "regenerateGroups": "Zamiešať / vygenerovať znova",
+    "moveToGroup": "Presunúť do skupiny"
   },
   "management": {
     "tournamentGroups": "Skupiny Turnaja",

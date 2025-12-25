@@ -202,7 +202,11 @@
     "tournamentTypeGroupsWithPlayoffs": "Group stage with optional playoffs",
     "tournamentTypePlayoffOnly": "Playoff only (no group stage)",
     "playoffStartStage": "Playoff starts from",
-    "playoffStartStageDescription": "This defines from which round the knockout bracket begins."
+    "playoffStartStageDescription": "This defines from which round the knockout bracket begins.",
+    "groupPreviewTitle": "Groups preview (edit before start)",
+    "groupPreviewHint": "You can move players between groups. Groups + matches will be created only after you confirm Start.",
+    "regenerateGroups": "Shuffle / regenerate",
+    "moveToGroup": "Move to group"
   },
   "management": {
     "tournamentGroups": "Tournament Groups",

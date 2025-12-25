@@ -852,7 +852,7 @@ export const tournamentService = {
   },
 
   // Start tournament (generate groups and matches)
-  async startTournament(tournamentId, groupSettings) {
+  async startTournament(tournamentId, groupSettings, customGroups = null) {
     try {
       
       // Get current tournament data
@@ -892,8 +892,39 @@ export const tournamentService = {
         throw new Error('Tournament needs at least 2 players to start');
       }
 
-      // Generate groups
-      const groups = this.generateGroups(players, groupSettings);
+      // Generate groups (or use provided custom groups from pre-start editor)
+      const playersById = new Map(players.map(p => [p.id, p]));
+      const hasCustomGroups = Array.isArray(customGroups) && customGroups.length > 0;
+
+      let groups = hasCustomGroups ? customGroups : this.generateGroups(players, groupSettings);
+
+      // Normalize groups: ensure ids/names exist, players are valid, and regenerate matches from final group players
+      const assignedPlayerIds = new Set();
+      groups = groups
+        .map((g, i) => {
+          const groupId = g?.id || generateId();
+          const groupName = g?.name || `Group ${String.fromCharCode(65 + i)}`;
+          const groupPlayers = (g?.players || [])
+            .map(p => playersById.get(p?.id) || p)
+            .filter(p => p && p.id);
+
+          groupPlayers.forEach(p => assignedPlayerIds.add(p.id));
+
+          return {
+            id: groupId,
+            name: groupName,
+            players: groupPlayers,
+            matches: this.generateGroupMatches(groupPlayers, i + 1),
+            standings: []
+          };
+        })
+        .filter(g => g.players.length > 0);
+
+      // Basic safety: if customGroups missed players, fall back to balanced generation
+      if (hasCustomGroups && assignedPlayerIds.size !== players.length) {
+        console.warn('Custom group assignment did not include all players; falling back to auto-generation.');
+        groups = this.generateGroups(players, groupSettings);
+      }
       
       // Create groups in database
       const groupIds = [];
@@ -973,8 +1004,9 @@ export const tournamentService = {
     let playersPerGroup;
 
     if (settings.type === 'groups') {
-      groupCount = settings.value;
-      playersPerGroup = Math.ceil(players.length / groupCount);
+      groupCount = Math.max(1, Number(settings.value) || 1);
+      // Don't create more groups than players
+      groupCount = Math.min(groupCount, players.length);
     } else {
       playersPerGroup = settings.value;
       groupCount = Math.ceil(players.length / playersPerGroup);
@@ -983,17 +1015,42 @@ export const tournamentService = {
     // Shuffle players for random distribution
     const shuffledPlayers = [...players].sort(() => Math.random() - 0.5);
 
-    for (let i = 0; i < groupCount; i++) {
-      const groupPlayers = shuffledPlayers.slice(i * playersPerGroup, (i + 1) * playersPerGroup);
-      if (groupPlayers.length > 0) {
-        const group = {
+    if (settings.type === 'groups') {
+      // Distribute players as evenly as possible:
+      // e.g. 34 players, 4 groups => 9, 9, 8, 8 (difference between any two groups is at most 1)
+      const baseSize = Math.floor(shuffledPlayers.length / groupCount);
+      const extra = shuffledPlayers.length % groupCount; // first <extra> groups get +1
+      let cursor = 0;
+
+      for (let i = 0; i < groupCount; i++) {
+        const size = baseSize + (i < extra ? 1 : 0);
+        const groupPlayers = shuffledPlayers.slice(cursor, cursor + size);
+        cursor += size;
+
+        if (groupPlayers.length === 0) continue;
+        groups.push({
           id: generateId(),
           name: `Group ${String.fromCharCode(65 + i)}`, // A, B, C, etc.
           players: groupPlayers,
           matches: this.generateGroupMatches(groupPlayers, i + 1),
           standings: []
-        };
-        groups.push(group);
+        });
+      }
+    } else {
+      // Legacy behavior: fixed players-per-group (last group may be smaller)
+      playersPerGroup = Math.max(1, Number(playersPerGroup) || 1);
+      for (let i = 0; i < groupCount; i++) {
+        const groupPlayers = shuffledPlayers.slice(i * playersPerGroup, (i + 1) * playersPerGroup);
+        if (groupPlayers.length > 0) {
+          const group = {
+            id: generateId(),
+            name: `Group ${String.fromCharCode(65 + i)}`, // A, B, C, etc.
+            players: groupPlayers,
+            matches: this.generateGroupMatches(groupPlayers, i + 1),
+            standings: []
+          };
+          groups.push(group);
+        }
       }
     }
 
@@ -1407,6 +1464,11 @@ export const tournamentService = {
         group_settings: groupSettingsWithCriteria,
         updated_at: new Date().toISOString()
       };
+
+      // Optionally update tournament type (used by the registration settings modal)
+      if (settings.tournamentType) {
+        updateData.tournament_type = settings.tournamentType;
+      }
       
       // Optionally update tournament status if provided in settings (e.g., for playoff-only start)
       if (settings.status) {
