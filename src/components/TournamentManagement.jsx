@@ -3274,6 +3274,25 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
   };
 
   const advancedPlayers = getAdvancedPlayers();
+
+  // Build a stable pool of all players who are in playoffs (qualified + anyone already present in the bracket)
+  const playoffPlayersPool = useMemo(() => {
+    const byId = new Map();
+
+    (qualifyingPlayers || []).forEach(qp => {
+      const p = qp?.player || qp;
+      if (p?.id) byId.set(p.id, p);
+    });
+
+    (allRounds || []).forEach(r => {
+      (r?.matches || []).forEach(m => {
+        if (m?.player1?.id) byId.set(m.player1.id, m.player1);
+        if (m?.player2?.id) byId.set(m.player2.id, m.player2);
+      });
+    });
+
+    return Array.from(byId.values());
+  }, [qualifyingPlayers, allRounds]);
   
   // Check if previous round is complete
   const isPreviousRoundComplete = () => {
@@ -3302,20 +3321,11 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
   const assignedPlayerIds = getAssignedPlayers();
 
   // Filter out already assigned players, but keep currently selected players
-  // Also filter to only show players who advanced from previous round (or all if first round)
+  // IMPORTANT: allow selecting from ALL playoff players (not only advanced players) to make manual repair possible.
   const getAvailablePlayers = (excludePlayerId = null) => {
-    // Use advanced players if available and previous round is complete
-    // Otherwise, if first round, use all qualifying players
-    // If later rounds but previous not complete, return empty (should complete previous round first)
-    let basePlayers;
-    if (currentRoundIndex === 0) {
-      basePlayers = qualifyingPlayers.map(qp => qp.player || qp);
-    } else if (advancedPlayers.length > 0 || isPreviousRoundComplete()) {
-      basePlayers = advancedPlayers;
-    } else {
-      // Previous round not complete yet - return empty list
-      basePlayers = [];
-    }
+    const basePlayers = playoffPlayersPool.length > 0
+      ? playoffPlayersPool
+      : (qualifyingPlayers || []).map(qp => qp.player || qp);
     
     return basePlayers.filter(player => {
       // Always include currently selected players (for player1 and player2 dropdowns)
@@ -3351,17 +3361,12 @@ function EditPlayoffMatchForm({ match, qualifyingPlayers, allRounds, onSave, onC
     <div className="edit-playoff-match-form">
       {currentRoundIndex > 0 && (
         <div className={`info-message ${!previousRoundComplete ? 'warning' : ''}`}>
-          {!previousRoundComplete ? (
-            t('management.completePreviousRoundFirst', { 
-              roundName: allRounds[currentRoundIndex - 1]?.name || t('management.previousRound')
-            })
-          ) : match.isThirdPlaceMatch ? (
-            t('management.onlySemifinalLosersAvailable')
-          ) : (
-            t('management.onlyAdvancedPlayersAvailable', {
-              roundName: allRounds[currentRoundIndex - 1]?.name || t('management.previousRound')
-            })
-          )}
+          {/* We still show a warning if previous round isn't complete, but allow manual selection. */}
+          {!previousRoundComplete
+            ? (t('management.completePreviousRoundFirst', { 
+                roundName: allRounds[currentRoundIndex - 1]?.name || t('management.previousRound')
+              }) || 'Previous round is not complete yet.')
+            : (t('management.youCanSelectAnyPlayoffPlayer') || 'You can select any player from the playoffs pool.')}
         </div>
       )}
       <div className="input-group">
