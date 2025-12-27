@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef } from 'react';
 import { tournamentService, matchService } from '../services/tournamentService.js';
 import { leagueService } from '../services/leagueService.js';
 
@@ -434,6 +434,12 @@ function updateGroupStandings(group, tournament = null) {
 // Context Provider
 export function TournamentProvider({ children }) {
   const [state, dispatch] = useReducer(tournamentReducer, initialState);
+  const stateRef = useRef(state);
+
+  // Keep a ref to the latest state so async callbacks don't use stale closures
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Load tournaments from Supabase on mount
   useEffect(() => {
@@ -512,7 +518,7 @@ export function TournamentProvider({ children }) {
     setTimeout(async () => {
       try {
         // Get the updated tournament from state after dispatch
-        const currentState = state;
+        const currentState = stateRef.current;
         if (currentState.currentTournament) {
           // If this is a playoff match, save updated playoff rounds
           if (matchResult.isPlayoff && currentState.currentTournament.playoffs) {

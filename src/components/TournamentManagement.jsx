@@ -197,11 +197,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     }
   }, [tournament?.id, tournament?.standingsCriteriaOrder, tournament?.playoffSettings]);
 
-  // Auto-refresh tournament data when there are live matches
-  // Only refresh when the live matches tab is active to avoid interfering with other tabs (e.g., filters)
+  // Auto-refresh tournament data
+  // - Live Matches tab: only poll when there are live matches
+  // - Playoffs tab: poll so results from other devices advance the bracket and populate next rounds
   useEffect(() => {
-    // Only run auto-refresh when live matches tab is active
-    if (activeTab !== 'liveMatches') {
+    // Only run auto-refresh when a tab that needs it is active
+    if (activeTab !== 'liveMatches' && activeTab !== 'playoffs') {
       return;
     }
 
@@ -224,8 +225,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
       return hasLiveGroupMatch || hasLivePlayoffMatch;
     };
 
-    if (!checkHasLiveMatches(tournament)) {
+    if (activeTab === 'liveMatches' && !checkHasLiveMatches(tournament)) {
       return; // No live matches, don't set up polling
+    }
+
+    if (activeTab === 'playoffs' && (!tournament?.playoffs?.rounds || tournament.playoffs.rounds.length === 0)) {
+      return; // No playoff bracket, nothing to keep in sync
     }
 
     // Set up interval to refresh tournament every 8 seconds
@@ -236,10 +241,9 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
           return;
         }
         
-        // Double-check we're still on the live matches tab before refreshing
-        // This prevents refreshing when user switches tabs
-        // Use ref to get current value (not stale closure)
-        if (activeTabRef.current !== 'liveMatches') {
+        // Double-check we're still on the same tab before refreshing (prevents refresh after tab switch)
+        const expectedTab = activeTabRef.current;
+        if (expectedTab !== 'liveMatches' && expectedTab !== 'playoffs') {
           return;
         }
         
