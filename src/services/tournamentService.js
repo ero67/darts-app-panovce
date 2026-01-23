@@ -1407,6 +1407,47 @@ export const tournamentService = {
     }
   },
 
+  // Reset tournament playoffs (clear all playoff data)
+  async resetTournamentPlayoffs(tournamentId) {
+    try {
+      // Clear the playoffs data and reset status to in_progress
+      const { data, error } = await supabase
+        .from('tournaments')
+        .update({ 
+          playoffs: null,
+          status: 'in_progress',
+          league_points_calculated: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', tournamentId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error resetting tournament playoffs:', error);
+        throw error;
+      }
+
+      // Also delete any playoff matches from the matches table
+      const { error: matchesError } = await supabase
+        .from('matches')
+        .delete()
+        .eq('tournament_id', tournamentId)
+        .eq('is_playoff', true);
+
+      if (matchesError) {
+        console.error('Error deleting playoff matches:', matchesError);
+        // Don't throw - the main reset succeeded
+      }
+
+      console.log('Successfully reset playoffs for tournament:', tournamentId);
+      return data;
+    } catch (error) {
+      console.error('Error resetting tournament playoffs:', error);
+      throw error;
+    }
+  },
+
   // Update tournament status
   async updateTournamentStatus(tournamentId, status) {
     try {

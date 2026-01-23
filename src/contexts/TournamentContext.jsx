@@ -588,6 +588,22 @@ export function TournamentProvider({ children }) {
     dispatch({ type: ACTIONS.START_PLAYOFFS, payload: { playoffs: playoffsData } });
   };
 
+  const resetPlayoffs = async () => {
+    try {
+      // Clear playoff data in database
+      await tournamentService.resetTournamentPlayoffs(state.currentTournament.id);
+      
+      // Reload the tournament to get fresh state
+      const updatedTournament = await tournamentService.getTournament(state.currentTournament.id);
+      dispatch({ type: ACTIONS.SELECT_TOURNAMENT, payload: updatedTournament });
+      
+      return updatedTournament;
+    } catch (error) {
+      console.error('Error resetting playoffs:', error);
+      throw error;
+    }
+  };
+
   const startTournament = async (groupSettings, customGroups = null) => {
     try {
       const updatedTournament = await tournamentService.startTournament(
@@ -663,6 +679,7 @@ export function TournamentProvider({ children }) {
     deleteTournament,
     updateTournamentStatus,
     startPlayoffs,
+    resetPlayoffs,
     startTournament,
     addPlayerToTournament,
     removePlayerFromTournament,

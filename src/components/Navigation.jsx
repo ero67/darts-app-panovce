@@ -30,7 +30,7 @@ export function Navigation({ currentView, onViewChange, tournament, isMobileOpen
     { id: '/', label: t('navigation.home'), icon: Home },
     { id: '/dashboard', label: t('navigation.dashboard'), icon: Trophy },
     { id: '/tournaments', label: t('navigation.tournaments'), icon: Users },
-    // { id: '/leagues', label: t('navigation.leagues'), icon: Crown }, // temporarily hidden
+    { id: '/leagues', label: t('navigation.leagues'), icon: Crown },
     // { id: '/privacy', label: 'Privacy', icon: Shield },
     // { id: '/players', label: t('navigation.players'), icon: Users },
     // { id: '/settings', label: t('navigation.settings'), icon: Settings }

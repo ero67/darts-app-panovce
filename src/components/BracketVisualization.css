@@ -158,6 +158,34 @@
   box-shadow: none;
 }
 
+/* 3rd Place Match Section */
+.third-place-match-section {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 2px dashed var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.third-place-header {
+  text-align: center;
+}
+
+.third-place-header h4 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bracket-match-viz.third-place-match {
+  position: relative;
+  width: 160px;
+  margin: 0 auto;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .bracket-visualization {
@@ -181,6 +209,15 @@
   
   .bracket-round-header-viz h4 {
     font-size: 0.8rem;
+  }
+  
+  .third-place-match-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+  }
+  
+  .bracket-match-viz.third-place-match {
+    width: 140px;
   }
 }
 

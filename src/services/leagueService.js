@@ -586,9 +586,6 @@ export const leagueService = {
         .update({ league_points_calculated: true })
         .eq('id', tournamentId);
 
-      // Update leaderboard cache
-      await this.updateLeaderboard(leagueId);
-
       return resultsToInsert;
     } catch (error) {
       console.error('Error calculating tournament placements:', error);
@@ -596,8 +593,236 @@ export const leagueService = {
     }
   },
 
-  // Update leaderboard cache
-  async updateLeaderboard(leagueId) {
+  // Recalculate all tournament results for a league (without updating leaderboard cache to avoid loops)
+  async recalculateAllResults(leagueId) {
+    try {
+      // Import tournamentService dynamically to avoid circular dependency
+      const { tournamentService } = await import('./tournamentService.js');
+      
+      // Get all completed tournaments for this league
+      const { data: tournaments, error: tournamentsError } = await supabase
+        .from('tournaments')
+        .select('id, name, league_points_calculated')
+        .eq('league_id', leagueId)
+        .eq('status', 'completed')
+        .eq('deleted', false);
+
+      if (tournamentsError) throw tournamentsError;
+      
+      console.log(`Found ${tournaments?.length || 0} completed tournaments for league ${leagueId}`);
+
+      // Process each tournament
+      for (const tournament of tournaments || []) {
+        try {
+          // Get full tournament data
+          const fullTournament = await tournamentService.getTournament(tournament.id);
+          
+          if (fullTournament) {
+            console.log(`Calculating placements for tournament: ${fullTournament.name || tournament.name}`);
+            
+            // Calculate placements from tournament data
+            const placements = this.extractPlacements(fullTournament);
+            
+            if (placements.length > 0) {
+              // Get league scoring rules
+              const { data: league } = await supabase
+                .from('leagues')
+                .select('scoring_rules')
+                .eq('id', leagueId)
+                .single();
+
+              const scoringRules = league?.scoring_rules || {
+                placementPoints: { "1": 12, "2": 9, "3": 7, "4": 5, "5": 3, "default": 1 },
+                allowManualOverride: true
+              };
+
+              const placementPoints = scoringRules.placementPoints || { "1": 12, "2": 9, "3": 7, "4": 5, "5": 3, "default": 1 };
+
+              // Award points and create results records
+              const resultsToInsert = placements.map(p => {
+                const points = placementPoints[p.placement.toString()] || placementPoints.default || 1;
+                return {
+                  league_id: leagueId,
+                  tournament_id: tournament.id,
+                  player_id: p.playerId,
+                  placement: p.placement,
+                  points_awarded: points
+                };
+              });
+
+              // Upsert results
+              if (resultsToInsert.length > 0) {
+                const { error: insertError } = await supabase
+                  .from('league_tournament_results')
+                  .upsert(resultsToInsert, {
+                    onConflict: 'league_id,tournament_id,player_id'
+                  });
+
+                if (insertError) {
+                  console.error('Error inserting results:', insertError);
+                } else {
+                  console.log(`Inserted ${resultsToInsert.length} results for tournament ${fullTournament.name || tournament.name}`);
+                }
+              }
+
+              // Mark tournament as calculated
+              await supabase
+                .from('tournaments')
+                .update({ league_points_calculated: true })
+                .eq('id', tournament.id);
+            } else {
+              console.log(`No placements found for tournament: ${fullTournament.name || tournament.name}`);
+            }
+          }
+        } catch (error) {
+          console.error(`Error calculating placements for tournament ${tournament.id}:`, error);
+          // Continue with other tournaments even if one fails
+        }
+      }
+
+      return { message: `Processed ${tournaments?.length || 0} tournaments` };
+    } catch (error) {
+      console.error('Error recalculating all results:', error);
+      throw error;
+    }
+  },
+
+  // Extract placements from tournament data structure
+  extractPlacements(tournamentData) {
+    const placements = [];
+    
+    // Check if tournament has playoffs
+    if (tournamentData.playoffs && tournamentData.playoffs.rounds && tournamentData.playoffs.rounds.length > 0) {
+      // Tournament has playoffs - use playoff results
+      const rounds = tournamentData.playoffs.rounds;
+      const finalRound = rounds[rounds.length - 1];
+      const finalMatch = finalRound?.matches?.find(m => !m.isThirdPlaceMatch && m.status === 'completed');
+      const thirdPlaceMatch = finalRound?.matches?.find(m => m.isThirdPlaceMatch);
+      const thirdPlaceMatchCompleted = thirdPlaceMatch?.status === 'completed';
+
+      // Assign placements for top positions
+      if (finalMatch && finalMatch.result) {
+        placements.push({
+          playerId: finalMatch.result.winner,
+          placement: 1
+        });
+        const loserId = finalMatch.result.winner === finalMatch.player1?.id 
+          ? finalMatch.player2?.id 
+          : finalMatch.player1?.id;
+        if (loserId) {
+          placements.push({
+            playerId: loserId,
+            placement: 2
+          });
+        }
+      }
+
+      // Handle 3rd place - either from 3rd place match or shared by semifinal losers
+      if (thirdPlaceMatch && thirdPlaceMatchCompleted && thirdPlaceMatch.result) {
+        // 3rd place match was played
+        placements.push({
+          playerId: thirdPlaceMatch.result.winner,
+          placement: 3
+        });
+        // Also add the 4th place (loser of third place match)
+        const fourthId = thirdPlaceMatch.result.winner === thirdPlaceMatch.player1?.id 
+          ? thirdPlaceMatch.player2?.id 
+          : thirdPlaceMatch.player1?.id;
+        if (fourthId) {
+          placements.push({
+            playerId: fourthId,
+            placement: 4
+          });
+        }
+      } else if (!thirdPlaceMatch && rounds.length >= 2) {
+        // No 3rd place match - both semifinal losers share 3rd place
+        // Find the semifinal round (second to last)
+        const semiFinalRound = rounds[rounds.length - 2];
+        if (semiFinalRound && semiFinalRound.matches) {
+          semiFinalRound.matches.forEach(match => {
+            if (match.status === 'completed' && match.result && !match.isThirdPlaceMatch) {
+              const loserId = match.result.winner === match.player1?.id 
+                ? match.player2?.id 
+                : match.player1?.id;
+              if (loserId) {
+                placements.push({
+                  playerId: loserId,
+                  placement: 3 // Both share 3rd place
+                });
+              }
+            }
+          });
+        }
+      }
+
+      // For other players, rank by round eliminated
+      const placedPlayerIds = new Set(placements.map(p => p.playerId));
+      let currentPlacement = thirdPlaceMatch ? 5 : 5; // Start from 5th (after 1st, 2nd, and 3rd/3rd or 3rd/4th)
+      
+      // Recalculate starting placement based on what we've already placed
+      currentPlacement = Math.max(...placements.map(p => p.placement)) + 1;
+      
+      // Process rounds from earliest (most eliminated) to latest, excluding final and semifinal (already processed)
+      for (let i = 0; i < rounds.length - 2; i++) {
+        const round = rounds[i];
+        round.matches?.forEach(match => {
+          if (match.status === 'completed' && match.result && !match.isThirdPlaceMatch) {
+            const loserId = match.result.winner === match.player1?.id 
+              ? match.player2?.id 
+              : match.player1?.id;
+            if (loserId && !placedPlayerIds.has(loserId)) {
+              placements.push({
+                playerId: loserId,
+                placement: currentPlacement++
+              });
+              placedPlayerIds.add(loserId);
+            }
+          }
+        });
+      }
+    } else if (tournamentData.groups && tournamentData.groups.length > 0) {
+      // Group-only tournament - use group standings
+      const allStandings = [];
+      
+      tournamentData.groups.forEach(group => {
+        if (group.standings && group.standings.length > 0) {
+          group.standings.forEach((standing, index) => {
+            if (standing.player && standing.player.id) {
+              allStandings.push({
+                playerId: standing.player.id,
+                groupName: group.name,
+                position: index + 1,
+                points: standing.points || 0,
+                legDifference: (standing.legsWon || 0) - (standing.legsLost || 0),
+                average: standing.average || 0
+              });
+            }
+          });
+        }
+      });
+
+      // Sort all players across groups by performance
+      allStandings.sort((a, b) => {
+        if (b.points !== a.points) return b.points - a.points;
+        if (b.legDifference !== a.legDifference) return b.legDifference - a.legDifference;
+        if (b.average !== a.average) return b.average - a.average;
+        return 0;
+      });
+
+      // Assign placements
+      allStandings.forEach((standing, index) => {
+        placements.push({
+          playerId: standing.playerId,
+          placement: index + 1
+        });
+      });
+    }
+    
+    return placements;
+  },
+
+  // Update leaderboard cache from league_tournament_results
+  async updateLeaderboardCache(leagueId) {
     try {
       // Get all tournament results for this league
       const { data: results, error: resultsError } = await supabase
@@ -606,10 +831,18 @@ export const leagueService = {
           *,
           tournament:tournaments(created_at)
         `)
-        .eq('league_id', leagueId)
-        .order('tournament.created_at', { ascending: false });
+        .eq('league_id', leagueId);
 
       if (resultsError) throw resultsError;
+      
+      // Sort by tournament date in memory (Supabase doesn't support ordering by related fields)
+      if (results) {
+        results.sort((a, b) => {
+          const dateA = a.tournament?.created_at ? new Date(a.tournament.created_at) : new Date(0);
+          const dateB = b.tournament?.created_at ? new Date(b.tournament.created_at) : new Date(0);
+          return dateB - dateA; // descending order
+        });
+      }
 
       // Aggregate by player
       const playerStats = {};
@@ -667,6 +900,25 @@ export const leagueService = {
       }
 
       return leaderboardEntries;
+    } catch (error) {
+      console.error('Error updating leaderboard cache:', error);
+      throw error;
+    }
+  },
+
+  // Full leaderboard update: recalculate all results and update cache
+  async updateLeaderboard(leagueId) {
+    try {
+      console.log(`Starting full leaderboard update for league ${leagueId}`);
+      
+      // First, recalculate all tournament results
+      await this.recalculateAllResults(leagueId);
+      
+      // Then update the leaderboard cache
+      const entries = await this.updateLeaderboardCache(leagueId);
+      
+      console.log(`Leaderboard updated with ${entries.length} entries`);
+      return entries;
     } catch (error) {
       console.error('Error updating leaderboard:', error);
       throw error;

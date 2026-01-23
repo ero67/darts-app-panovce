@@ -43,6 +43,7 @@ export function TournamentCreation({ onTournamentCreated, onBack }) {
     startingRoundPlayers: 8,
     seedingMethod: 'standard',
     groupMatchups: [],
+    thirdPlaceMatch: true, // Whether to play a 3rd place match or both semifinal losers share 3rd
     legsToWinByRound: {
       32: 3,
       16: 3,
@@ -454,6 +455,38 @@ export function TournamentCreation({ onTournamentCreated, onBack }) {
                 )}
               </>
               )}
+
+              <div className="input-group">
+                <label>{t('registration.thirdPlaceMatch') || '3rd Place Match'}</label>
+                <div className="radio-group">
+                  <label>
+                    <input
+                      type="radio"
+                      name="thirdPlaceMatch"
+                      value="true"
+                      checked={playoffSettings.thirdPlaceMatch === true}
+                      onChange={() => setPlayoffSettings({
+                        ...playoffSettings,
+                        thirdPlaceMatch: true
+                      })}
+                    />
+                    {t('registration.thirdPlaceMatchYes') || 'Yes - Semifinal losers play for 3rd/4th place'}
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="thirdPlaceMatch"
+                      value="false"
+                      checked={playoffSettings.thirdPlaceMatch === false}
+                      onChange={() => setPlayoffSettings({
+                        ...playoffSettings,
+                        thirdPlaceMatch: false
+                      })}
+                    />
+                    {t('registration.thirdPlaceMatchNo') || 'No - Both semifinal losers share 3rd place'}
+                  </label>
+                </div>
+              </div>
               
               <div className="playoff-legs-settings">
                 <h5>{t('registration.playoffLegsToWin')}:</h5>

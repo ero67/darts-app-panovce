@@ -301,6 +301,37 @@ export function BracketVisualization({ rounds, playoffMatches = [] }) {
         ))}
         </svg>
       )}
+      
+      {/* 3rd Place Match - shown separately below the bracket */}
+      {(() => {
+        // Find 3rd place match from the final round
+        const finalRound = rounds[rounds.length - 1];
+        const thirdPlaceMatch = finalRound?.matches?.find(m => m.isThirdPlaceMatch);
+        
+        if (!thirdPlaceMatch) return null;
+        
+        const matchData = getMatchData(thirdPlaceMatch);
+        const winner = getWinner(matchData);
+        const isCompleted = matchData.status === 'completed';
+        const player1Winner = winner?.id === matchData.player1?.id;
+        const player2Winner = winner?.id === matchData.player2?.id;
+        
+        return (
+          <div className="third-place-match-section">
+            <div className="third-place-header">
+              <h4>🥉 3rd Place Match</h4>
+            </div>
+            <div className="bracket-match-viz third-place-match">
+              <div className={`bracket-player ${player1Winner ? 'winner' : ''} ${isCompleted && !player1Winner ? 'loser' : ''} ${!matchData.player1 ? 'tbd' : ''}`}>
+                {matchData.player1?.name || 'TBD'}
+              </div>
+              <div className={`bracket-player ${player2Winner ? 'winner' : ''} ${isCompleted && !player2Winner ? 'loser' : ''} ${!matchData.player2 ? 'tbd' : ''}`}>
+                {matchData.player2?.name || 'TBD'}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

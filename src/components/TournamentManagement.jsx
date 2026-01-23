@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings, Edit2, ChevronUp, ChevronDown, Clock, Activity, BarChart3, X, Search, Grid3x3, List } from 'lucide-react';
+import { ArrowLeft, Play, Users, Trophy, Target, Wifi, WifiOff, Eye, Trash2, CheckCircle, Settings, Edit2, ChevronUp, ChevronDown, Clock, Activity, BarChart3, X, Search, Grid3x3, List, RotateCcw } from 'lucide-react';
 import { useLiveMatch } from '../contexts/LiveMatchContext';
 import { useAdmin } from '../contexts/AdminContext';
 import { useTournament } from '../contexts/TournamentContext';
@@ -148,7 +148,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   });
   const { isMatchLive, isMatchLiveOnThisDevice, isMatchStartedByCurrentUser, getLiveMatchInfo } = useLiveMatch();
   const { isAdmin, isAdminMode } = useAdmin();
-  const { startPlayoffs: contextStartPlayoffs, updateTournamentSettings, getTournament } = useTournament();
+  const { startPlayoffs: contextStartPlayoffs, resetPlayoffs: contextResetPlayoffs, updateTournamentSettings, getTournament } = useTournament();
 
   // Update tournamentSettings when tournament prop changes (e.g., after reload from DB)
   useEffect(() => {
@@ -356,11 +356,11 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   // Generate playoff rounds if they don't exist
   // Rounds should start at the appropriate level based on number of qualifiers
   // Top 8 = Quarterfinals, Top 16 = Round of 16, etc.
-  const generatePlayoffRounds = useCallback((totalQualifiers) => {
+  const generatePlayoffRounds = useCallback((totalQualifiers, includeThirdPlaceMatch = true) => {
     const rounds = [];
     let currentRoundSize = totalQualifiers;
     let roundNumber = 1;
-    let hasThirdPlaceMatch = false;
+    let hasSemifinals = false;
 
     // Generate rounds from first round to final
     while (currentRoundSize > 1) {
@@ -389,19 +389,17 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
 
       rounds.push(round);
       
-      // If we're at semifinals (4 players), add 3rd place match to the final round
-      if (currentRoundSize === 4 && !hasThirdPlaceMatch) {
-        hasThirdPlaceMatch = true;
-        // Add 3rd place match to the final round (which will be created next iteration)
-        // We'll add it after the final round is created
+      // Track if we have a semifinals (will need 3rd place match)
+      if (numMatches === 2) {
+        hasSemifinals = true;
       }
       
       currentRoundSize = numMatches;
       roundNumber++;
     }
 
-    // Add 3rd place match if we had semifinals (4 qualifiers)
-    if (totalQualifiers === 4 && rounds.length >= 2) {
+    // Add 3rd place match if enabled and we have semifinals (at least 4 qualifiers)
+    if (includeThirdPlaceMatch && hasSemifinals && rounds.length >= 2) {
       const finalRound = rounds[rounds.length - 1];
       finalRound.matches.push({
         id: generateId(),
@@ -430,9 +428,38 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     const seedingMethod = tournament?.playoffSettings?.seedingMethod || 'standard';
     
     // Group-based seeding
-    if (seedingMethod === 'groupBased' && tournament?.groups && tournament?.playoffSettings?.groupMatchups) {
-      const groupMatchups = tournament.playoffSettings.groupMatchups;
+    if (seedingMethod === 'groupBased' && tournament?.groups && tournament.groups.length > 0) {
+      let groupMatchups = tournament.playoffSettings?.groupMatchups;
       const playersPerGroup = tournament.playoffSettings?.playersPerGroup || 1;
+      
+      // Auto-generate group matchups if not configured
+      if (!groupMatchups || groupMatchups.length === 0) {
+        const groupNames = tournament.groups.map(g => g.name);
+        groupMatchups = [];
+        
+        // For 2 groups: A vs B
+        // For 4 groups: A vs D, B vs C (crossover)
+        // For 6+ groups: pair them up with crossover pattern
+        if (groupNames.length === 2) {
+          groupMatchups.push({ group1: groupNames[0], group2: groupNames[1] });
+        } else if (groupNames.length >= 4) {
+          // Crossover: first half vs second half (reversed)
+          const halfLength = Math.floor(groupNames.length / 2);
+          for (let i = 0; i < halfLength; i++) {
+            groupMatchups.push({ 
+              group1: groupNames[i], 
+              group2: groupNames[groupNames.length - 1 - i] 
+            });
+          }
+        } else {
+          // For odd number of groups or 3 groups, just pair sequentially
+          for (let i = 0; i < groupNames.length - 1; i += 2) {
+            groupMatchups.push({ group1: groupNames[i], group2: groupNames[i + 1] });
+          }
+        }
+        
+        console.log('Auto-generated group matchups:', groupMatchups);
+      }
       
       // Get players organized by group
       const playersByGroup = {};
@@ -497,7 +524,15 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
         }
       });
       
-      return firstRound;
+      // Check if we successfully assigned players to all matches
+      const assignedMatches = firstRound.matches.filter(m => m.player1 && m.player2).length;
+      if (assignedMatches >= numMatches) {
+        console.log(`Group-based seeding assigned ${assignedMatches} matches`);
+        return firstRound;
+      } else {
+        console.log(`Group-based seeding only assigned ${assignedMatches}/${numMatches} matches, falling back to standard seeding`);
+        // Fall through to standard seeding below
+      }
     }
     
     // Standard tournament bracket seeding (default)
@@ -563,9 +598,12 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
   // Seeding: Best vs Worst, 2nd best vs 2nd worst, etc.
   const populatePlayoffBracket = useCallback((qualifyingPlayers, rounds) => {
     
+    // Get the thirdPlaceMatch setting from tournament (default to true for backwards compatibility)
+    const includeThirdPlaceMatch = tournament?.playoffSettings?.thirdPlaceMatch !== false;
+    
     // If no rounds exist, generate them first
     if (!rounds || rounds.length === 0) {
-      rounds = generatePlayoffRounds(qualifyingPlayers.length);
+      rounds = generatePlayoffRounds(qualifyingPlayers.length, includeThirdPlaceMatch);
     }
     
     const updatedRounds = [...rounds];
@@ -594,7 +632,7 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     }
     
     return updatedRounds;
-  }, [generatePlayoffRounds, seedFirstRound]);
+  }, [generatePlayoffRounds, seedFirstRound, tournament]);
 
   // Note: Removed automatic playoff player assignment - playoffs should only start when user clicks button
 
@@ -778,6 +816,24 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     
     // Show success message
     alert(t('management.playoffsStartedSuccess', { count: qualifyingPlayers.length }));
+  };
+
+  // Reset playoffs to allow restarting
+  const handleResetPlayoffs = async () => {
+    if (!tournament) return;
+    
+    const confirmMessage = t('management.confirmResetPlayoffs') || 
+      'Are you sure you want to reset the playoffs? This will clear all playoff matches and results. Group stage data will be preserved.';
+    
+    if (window.confirm(confirmMessage)) {
+      try {
+        await contextResetPlayoffs();
+        alert(t('management.playoffsResetSuccess') || 'Playoffs have been reset. You can now start them again.');
+      } catch (error) {
+        console.error('Error resetting playoffs:', error);
+        alert(t('management.failedToResetPlayoffs') || 'Failed to reset playoffs. Please try again.');
+      }
+    }
   };
 
   // Get round name based on number of matches, not players
@@ -2060,8 +2116,8 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
             <div className="playoffs-header">
               <h3>Ready to Start Playoffs!</h3>
               <div className="playoff-info">
-                <span>Group stage completed</span>
-                <span>{qualifyingPlayers.length} players qualified</span>
+                <span>{t('management.groupStageCompleted')}</span>
+                <span>{qualifyingPlayers.length} {t('management.playersQualified')}</span>
               </div>
             </div>
 
@@ -2130,10 +2186,10 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
     return (
       <div className="playoffs-view">
         <div className="playoffs-header">
-          <h3>Playoff Bracket</h3>
+          <h3>{t('management.playoffBracket')}</h3>
           <div className="playoff-info">
-            <span>{qualifyingPlayers.length} players qualified</span>
-            <span>Current Round: {rounds[currentRound - 1]?.name || 'Completed'}</span>
+            <span>{qualifyingPlayers.length} {t('management.playersQualified')}</span>
+            <span>{t('management.currentRound')}: {rounds[currentRound - 1]?.name || t('common.completed')}</span>
           </div>
           <div className="bracket-view-toggle">
             <button
@@ -2142,16 +2198,27 @@ export function TournamentManagement({ tournament, onMatchStart, onBack, onDelet
               title="Detailed View"
             >
               <List size={18} />
-              Detailed
+              {t('management.detailed')}
             </button>
             <button
               className={`view-toggle-btn ${bracketViewMode === 'compact' ? 'active' : ''}`}
               onClick={() => setBracketViewMode('compact')}
-              title="Compact Bracket View"
+              title={t('management.bracket')}
             >
               <Grid3x3 size={18} />
-              Bracket
+              {t('management.bracket')}
             </button>
+            {isAdmin && (
+              <button
+                className="view-toggle-btn reset-btn"
+                onClick={handleResetPlayoffs}
+                title={t('management.confirmResetPlayoffs')}
+                style={{ marginLeft: '1rem', background: 'var(--danger-color)', color: 'white' }}
+              >
+                <RotateCcw size={18} />
+                {t('common.reset')}
+              </button>
+            )}
           </div>
         </div>
 
